@@ -1,0 +1,11 @@
+## Interface: 30300
+## Title: EbonBuilds
+## Dependencies: ProjectEbonhold
+## SavedVariables: EbonBuildsDB
+
+core/Init.lua
+modules/weights/Weights.lua
+modules/ui/MinimapButton.lua
+modules/ui/ConfigWindow.lua
+modules/ui/EchoTableRows.lua
+modules/ui/EchoTable.lua

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/Trabalho//**)",
+      "Read(//c//**)",
+      "Bash(node mpq_extract.js /c/Ebonhold/Data/patch-4.MPQ \"\" /c/Ebonhold/Data/patch4_out)",
+      "Bash(git init *)",
+      "Bash(git add *)"
+    ]
+  }
+}
