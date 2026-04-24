@@ -7,5 +7,6 @@ core/Init.lua
 modules/weights/Weights.lua
 modules/ui/MinimapButton.lua
 modules/ui/ConfigWindow.lua
+modules/ui/Filters.lua
 modules/ui/EchoTableRows.lua
 modules/ui/EchoTable.lua

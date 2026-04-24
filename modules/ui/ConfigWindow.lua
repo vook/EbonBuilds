@@ -61,6 +61,7 @@ end
 function EbonBuilds.ConfigWindow.Init()
     local frame = BuildFrame()
     EbonBuilds.ConfigWindow._frame = frame
+    EbonBuilds.Filters.Init(frame)
     EbonBuilds.EchoTable.Init(frame)
 end
 

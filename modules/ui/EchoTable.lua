@@ -11,8 +11,9 @@ local ROW_HEIGHT   = 36
 local COL_ICON     = 40
 local COL_WEIGHT   = 80
 
-local echoList   = {}
-local rowPool    = {}
+local echoList     = {}
+local filteredList = {}
+local rowPool      = {}
 local scrollFrame, scrollChild, scrollBar
 
 ------------------------------------------------------------------------
@@ -39,7 +40,7 @@ end
 
 local function UpdateScrollRange()
     local visibleCount = GetVisibleCount()
-    local maxOffset    = math.max(0, (#echoList - visibleCount + 1) * ROW_HEIGHT)
+    local maxOffset    = math.max(0, (#filteredList - visibleCount + 1) * ROW_HEIGHT)
     scrollBar:SetMinMaxValues(0, maxOffset)
     if scrollBar:GetValue() > maxOffset then scrollBar:SetValue(maxOffset) end
 end
@@ -52,7 +53,7 @@ local function RefreshRows()
             rowPool[poolIdx] = EbonBuilds.EchoTableRows.CreateRow(scrollChild, poolIdx)
         end
         local listIdx = scrollOffset + poolIdx
-        local entry   = echoList[listIdx]
+        local entry   = filteredList[listIdx]
         if entry then
             local yOffset = -(poolIdx - 1) * ROW_HEIGHT
             EbonBuilds.EchoTableRows.Populate(rowPool[poolIdx], yOffset, entry)
@@ -114,11 +115,14 @@ end
 -- Public Init
 ------------------------------------------------------------------------
 
+local FILTER_BAR_OFFSET = 34
+
 function EbonBuilds.EchoTable.Init(parent)
-    echoList = EbonBuilds.EchoTableRows.BuildSortedList()
+    echoList     = EbonBuilds.EchoTableRows.BuildSortedList()
+    filteredList = echoList
 
     local left  = PADDING
-    local top   = -(TITLE_HEIGHT + PADDING)
+    local top   = -(TITLE_HEIGHT + PADDING) - FILTER_BAR_OFFSET
     local width = parent:GetWidth() - PADDING * 2
 
     CreateHeaders(parent, top, left, width)
@@ -134,6 +138,16 @@ function EbonBuilds.EchoTable.Init(parent)
         UpdateScrollRange()
         RefreshRows()
     end)
+
+    if EbonBuilds.Filters and EbonBuilds.Filters.OnChange then
+        EbonBuilds.Filters.OnChange(function()
+            filteredList = EbonBuilds.Filters.Apply(echoList)
+            UpdateScrollRange()
+            scrollBar:SetValue(0)
+            RefreshRows()
+        end)
+    end
+
     UpdateScrollRange()
     RefreshRows()
 end

@@ -7,9 +7,7 @@ local COL_ICON   = 40
 local COL_WEIGHT = 80
 local ROW_HEIGHT = 36
 
-------------------------------------------------------------------------
--- Data preparation
-------------------------------------------------------------------------
+-- Data preparation -----------------------------------------------------
 
 local QUALITY_SUFFIXES = {
     " %- Common$", " %- Uncommon$", " %- Rare$", " %- Epic$", " %- Legendary$"
@@ -23,7 +21,6 @@ local function StripQualitySuffix(name)
     return name
 end
 
--- Returns a map: baseName -> { spellId, quality } keeping highest quality.
 local function BuildBestByName()
     local best = {}
     for spellId, data in pairs(ProjectEbonhold.PerkDatabase) do
@@ -31,28 +28,34 @@ local function BuildBestByName()
         if raw and raw ~= "" then
             local name = StripQualitySuffix(raw)
             local existing = best[name]
-            if not existing or data.quality > existing.quality then
-                best[name] = { spellId = spellId, quality = data.quality }
+            if not existing then
+                existing = { spellId = spellId, quality = data.quality, qualities = {}, families = data.families or {} }
+                best[name] = existing
+            elseif data.quality > existing.quality then
+                existing.spellId  = spellId
+                existing.quality  = data.quality
+                existing.families = data.families or {}
             end
+            existing.qualities[data.quality] = true
         end
     end
     return best
 end
 
--- Returns a list sorted alphabetically: { { spellId, name, quality }, ... }.
 function EbonBuilds.EchoTableRows.BuildSortedList()
     local best = BuildBestByName()
     local list = {}
     for name, entry in pairs(best) do
-        list[#list + 1] = { spellId = entry.spellId, name = name, quality = entry.quality }
+        list[#list + 1] = {
+            spellId = entry.spellId, name = name, quality = entry.quality,
+            qualities = entry.qualities, families = entry.families,
+        }
     end
     table.sort(list, function(a, b) return a.name < b.name end)
     return list
 end
 
-------------------------------------------------------------------------
--- Icon cell
-------------------------------------------------------------------------
+-- Icon cell ------------------------------------------------------------
 
 local function CreateIconFrame(row)
     local frame = CreateFrame("Frame", nil, row)
@@ -89,9 +92,7 @@ local function WireIconTooltip(iconFrame)
     iconFrame:SetScript("OnLeave", function() GameTooltip:Hide() end)
 end
 
-------------------------------------------------------------------------
--- Weight cell
-------------------------------------------------------------------------
+-- Weight cell ----------------------------------------------------------
 
 local function RestoreWeight(editBox)
     editBox:SetText(tostring(EbonBuilds.Weights.Get(editBox.echoName)))
@@ -150,9 +151,7 @@ local function CreateWeightBox(row)
     return box
 end
 
-------------------------------------------------------------------------
--- Row factory
-------------------------------------------------------------------------
+-- Row factory ----------------------------------------------------------
 
 local function AddBackground(row, index)
     local bg = row:CreateTexture(nil, "BACKGROUND")
@@ -190,7 +189,6 @@ function EbonBuilds.EchoTableRows.CreateRow(parent, index)
     return row
 end
 
--- Populates a row frame with data from an echo list entry.
 function EbonBuilds.EchoTableRows.Populate(row, yOffset, entry)
     row:SetPoint("TOP", row:GetParent(), "TOP", 0, yOffset)
     row.iconFrame.spellId = entry.spellId
