@@ -10,7 +10,6 @@ local HEADER_HEIGHT= 24
 local ROW_HEIGHT   = 36
 local COL_ICON     = 40
 local COL_WEIGHT   = 80
-local POOL_SIZE    = 20
 
 local echoList   = {}
 local rowPool    = {}
@@ -26,28 +25,32 @@ local function CreateHeaders(parent, top, left, width)
         fs:SetPoint("TOPLEFT", parent, "TOPLEFT", x, top)
         fs:SetText(text)
     end
-    MakeHeader("Icon",   left)
     MakeHeader("Name",   left + COL_ICON + 4)
     MakeHeader("Weight", left + width - COL_WEIGHT)
-end
-
-------------------------------------------------------------------------
--- Row pool
-------------------------------------------------------------------------
-
-local function BuildRowPool(parent)
-    for i = 1, POOL_SIZE do
-        rowPool[i] = EbonBuilds.EchoTableRows.CreateRow(parent, i)
-    end
 end
 
 ------------------------------------------------------------------------
 -- Scroll rendering
 ------------------------------------------------------------------------
 
+local function GetVisibleCount()
+    return math.ceil(scrollFrame:GetHeight() / ROW_HEIGHT) + 1
+end
+
+local function UpdateScrollRange()
+    local visibleCount = GetVisibleCount()
+    local maxOffset    = math.max(0, (#echoList - visibleCount + 1) * ROW_HEIGHT)
+    scrollBar:SetMinMaxValues(0, maxOffset)
+    if scrollBar:GetValue() > maxOffset then scrollBar:SetValue(maxOffset) end
+end
+
 local function RefreshRows()
     local scrollOffset = math.floor(scrollBar:GetValue() / ROW_HEIGHT + 0.5)
-    for poolIdx = 1, POOL_SIZE do
+    local visibleCount = GetVisibleCount()
+    for poolIdx = 1, visibleCount do
+        if not rowPool[poolIdx] then
+            rowPool[poolIdx] = EbonBuilds.EchoTableRows.CreateRow(scrollChild, poolIdx)
+        end
         local listIdx = scrollOffset + poolIdx
         local entry   = echoList[listIdx]
         if entry then
@@ -64,19 +67,20 @@ end
 ------------------------------------------------------------------------
 
 local function WireScrollBar(sf, bar)
-    sf:SetScript("OnScrollRangeChanged", function(self, xRange, yRange)
-        local maxVal = math.max(0, yRange)
-        bar:SetMinMaxValues(0, maxVal)
-        if bar:GetValue() > maxVal then bar:SetValue(maxVal) end
-    end)
-
     bar:SetScript("OnValueChanged", function(self, value)
-        sf:SetVerticalScroll(value)
         RefreshRows()
     end)
 
+    sf:EnableMouseWheel(true)
     sf:SetScript("OnMouseWheel", function(self, delta)
-        bar:SetValue(bar:GetValue() - delta * ROW_HEIGHT)
+        local current  = bar:GetValue()
+        local min, max = bar:GetMinMaxValues()
+        bar:SetValue(math.max(min, math.min(max, current - delta * ROW_HEIGHT)))
+    end)
+
+    sf:SetScript("OnSizeChanged", function()
+        UpdateScrollRange()
+        RefreshRows()
     end)
 end
 
@@ -85,7 +89,7 @@ end
 ------------------------------------------------------------------------
 
 local function CreateScrollBar(parent, sf)
-    local bar = CreateFrame("Slider", nil, parent, "UIPanelScrollBarTemplate")
+    local bar = CreateFrame("Slider", nil, sf, "UIPanelScrollBarTemplate")
     bar:SetPoint("TOPRIGHT",    sf, "TOPRIGHT",    18, -16)
     bar:SetPoint("BOTTOMRIGHT", sf, "BOTTOMRIGHT", 18,  16)
     bar:SetMinMaxValues(0, 0)
@@ -100,8 +104,8 @@ local function CreateScrollFrame(parent, x, y)
     sf:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -x - 20, PADDING)
 
     local child = CreateFrame("Frame", nil, sf)
-    child:SetWidth(sf:GetWidth() or (parent:GetWidth() - x * 2 - 20))
-    child:SetHeight(#echoList * ROW_HEIGHT)
+    child:SetWidth(parent:GetWidth() - x * 2 - 20)
+    child:SetHeight(math.max(1, parent:GetHeight() - PADDING * 2))
     sf:SetScrollChild(child)
     return sf, child
 end
@@ -124,9 +128,12 @@ function EbonBuilds.EchoTable.Init(parent)
 
     scrollBar = CreateScrollBar(parent, scrollFrame)
 
-    BuildRowPool(scrollChild)
     WireScrollBar(scrollFrame, scrollBar)
 
-    scrollFrame:SetScript("OnShow", function() RefreshRows() end)
+    scrollFrame:SetScript("OnShow", function()
+        UpdateScrollRange()
+        RefreshRows()
+    end)
+    UpdateScrollRange()
     RefreshRows()
 end

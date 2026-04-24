@@ -11,12 +11,25 @@ local ROW_HEIGHT = 36
 -- Data preparation
 ------------------------------------------------------------------------
 
--- Returns a map: comment -> { spellId, quality } keeping highest quality.
+local QUALITY_SUFFIXES = {
+    " %- Common$", " %- Uncommon$", " %- Rare$", " %- Epic$", " %- Legendary$"
+}
+
+local function StripQualitySuffix(name)
+    for _, pattern in ipairs(QUALITY_SUFFIXES) do
+        local stripped = name:match("^(.+)" .. pattern)
+        if stripped then return stripped end
+    end
+    return name
+end
+
+-- Returns a map: baseName -> { spellId, quality } keeping highest quality.
 local function BuildBestByName()
     local best = {}
     for spellId, data in pairs(ProjectEbonhold.PerkDatabase) do
-        local name = data.comment
-        if name and name ~= "" then
+        local raw = data.comment
+        if raw and raw ~= "" then
+            local name = StripQualitySuffix(raw)
             local existing = best[name]
             if not existing or data.quality > existing.quality then
                 best[name] = { spellId = spellId, quality = data.quality }
@@ -59,8 +72,18 @@ end
 
 local function WireIconTooltip(iconFrame)
     iconFrame:SetScript("OnEnter", function(self)
+        local spellName = GetSpellInfo(self.spellId)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetSpell(self.spellId, "BOOKTYPE_SPELL")
+        GameTooltip:ClearLines()
+        if spellName then
+            GameTooltip:AddLine(spellName, 1, 0.82, 0)
+        end
+        if utils and utils.GetSpellDescription then
+            local description = utils.GetSpellDescription(self.spellId, 500, 1)
+            if description and description ~= "" then
+                GameTooltip:AddLine(description, 1, 1, 1, true)
+            end
+        end
         GameTooltip:Show()
     end)
     iconFrame:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -103,12 +126,26 @@ local function WireWeightBox(editBox)
 end
 
 local function CreateWeightBox(row)
-    local box = CreateFrame("EditBox", nil, row, "InputBoxTemplate")
-    box:SetWidth(COL_WEIGHT - 8)
-    box:SetHeight(20)
-    box:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+    local editContainer = CreateFrame("Frame", nil, row)
+    editContainer:SetSize(58, 22)
+    editContainer:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+    editContainer:SetBackdrop({
+        bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 8, edgeSize = 8,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    editContainer:SetBackdropColor(0, 0, 0, 0.6)
+    editContainer:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+
+    local box = CreateFrame("EditBox", nil, editContainer)
+    box:SetSize(52, 18)
+    box:SetPoint("CENTER", editContainer, "CENTER", 0, 0)
+    box:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+    box:SetTextColor(1, 1, 1, 1)
+    box:SetJustifyH("CENTER")
     box:SetAutoFocus(false)
-    box:SetMaxLetters(9)
+    box:SetMaxLetters(6)
     WireWeightBox(box)
     return box
 end

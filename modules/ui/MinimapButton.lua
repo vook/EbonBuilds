@@ -33,17 +33,20 @@ local function CreateButton()
     button:RegisterForClicks("LeftButtonUp")
     button:RegisterForDrag("LeftButton")
 
-    -- Circular mask via a highlight texture that clips to a circle shape.
+    -- Icon texture, centred and corner-cropped so the square appears round.
     local icon = button:CreateTexture(nil, "BACKGROUND")
-    icon:SetAllPoints(button)
+    icon:SetWidth(20)
+    icon:SetHeight(20)
+    icon:SetPoint("CENTER", button, "CENTER", 0, 0)
     icon:SetTexture(ICON_FALLBACK)
+    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
     -- Circular border overlay (standard minimap button look).
     local border = button:CreateTexture(nil, "OVERLAY")
     border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
-    border:SetWidth(56)
-    border:SetHeight(56)
-    border:SetPoint("TOPLEFT", button, "TOPLEFT", -12, 12)
+    border:SetWidth(54)
+    border:SetHeight(54)
+    border:SetPoint("TOPLEFT", button, "TOPLEFT", 0, 0)
 
     return button
 end
