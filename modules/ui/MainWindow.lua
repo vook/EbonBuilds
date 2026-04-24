@@ -27,7 +27,7 @@ local function CreateTitleBar(frame)
 
     local dragRegion = CreateFrame("Frame", nil, frame)
     dragRegion:SetPoint("TOPLEFT",  frame, "TOPLEFT",  0,   0)
-    dragRegion:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0,   0)
+    dragRegion:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -37, 0)
     dragRegion:SetHeight(30)
     dragRegion:EnableMouse(true)
     dragRegion:RegisterForDrag("LeftButton")
@@ -38,6 +38,7 @@ end
 local function CreateCloseButton(frame)
     local closeBtn = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
     closeBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -5, -5)
+    closeBtn:SetFrameLevel(100)
     closeBtn:SetScript("OnClick", function() frame:Hide() end)
 end
 
@@ -61,8 +62,6 @@ local function BuildFrame()
     frame:SetWidth(WINDOW_WIDTH)
     frame:SetHeight(WINDOW_HEIGHT)
     frame:SetPoint("CENTER", UIParent, "CENTER")
-    frame:SetMovable(true)
-    frame:EnableMouse(true)
     frame:SetFrameStrata("DIALOG")
     frame:SetToplevel(true)
 
@@ -86,13 +85,16 @@ function EbonBuilds.MainWindow.Init()
     EbonBuilds.ViewRouter.SetContainer(right)
     EbonBuilds.BuildList.Init(left)
     EbonBuilds.WeightsView.Init()
+    print('oi')
     EbonBuilds.BuildForm.Init()
+    EbonBuilds.SettingsView.Init()
+    EbonBuilds.BuildTabs.Init()
 
-    -- Default view depends on active build; if one exists, show weights, else form.
-    if EbonBuilds.Build.GetActive() then
-        EbonBuilds.ViewRouter.Show("weights")
+    local active = EbonBuilds.Build.GetActive()
+    if active then
+        EbonBuilds.ViewRouter.Show("buildTabs", { mode = "edit", build = active })
     else
-        EbonBuilds.ViewRouter.Show("buildForm", { mode = "create" })
+        EbonBuilds.ViewRouter.Show("buildTabs", { mode = "create" })
     end
 end
 
