@@ -4,9 +4,16 @@
 ## SavedVariables: EbonBuildsDB
 
 core/Init.lua
+modules/build/Build.lua
+modules/data/SpecData.lua
 modules/weights/Weights.lua
 modules/ui/MinimapButton.lua
-modules/ui/ConfigWindow.lua
+modules/ui/MainWindow.lua
+modules/ui/ViewRouter.lua
+modules/ui/BuildList.lua
+modules/ui/EchoPicker.lua
+modules/ui/BuildForm.lua
 modules/ui/Filters.lua
 modules/ui/EchoTableRows.lua
 modules/ui/EchoTable.lua
+modules/ui/WeightsView.lua

@@ -14,13 +14,16 @@ local function OnAddonLoaded(addonName)
     end
 
     EbonBuildsDB = EbonBuildsDB or {
-        echoWeights  = {},
-        minimapAngle = 220,
+        builds        = {},
+        activeBuildId = nil,
+        minimapAngle  = 220,
     }
+    EbonBuildsDB.minimapAngle = EbonBuildsDB.minimapAngle or 220
 
+    EbonBuilds.Build.Migrate()
     EbonBuilds.Weights.Init()
     EbonBuilds.MinimapButton.Init()
-    EbonBuilds.ConfigWindow.Init()
+    EbonBuilds.MainWindow.Init()
 end
 
 eventFrame:RegisterEvent("ADDON_LOADED")

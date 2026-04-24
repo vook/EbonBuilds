@@ -42,6 +42,8 @@ local function BuildBestByName()
     return best
 end
 
+EbonBuilds.EchoTableRows.BuildBestByName = BuildBestByName
+
 function EbonBuilds.EchoTableRows.BuildSortedList()
     local best = BuildBestByName()
     local list = {}
@@ -75,6 +77,7 @@ end
 
 local function WireIconTooltip(iconFrame)
     iconFrame:SetScript("OnEnter", function(self)
+        if not self.spellId then return end
         local spellName = GetSpellInfo(self.spellId)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:ClearLines()
@@ -91,6 +94,7 @@ local function WireIconTooltip(iconFrame)
     end)
     iconFrame:SetScript("OnLeave", function() GameTooltip:Hide() end)
 end
+EbonBuilds.EchoTableRows.WireIconTooltip = WireIconTooltip
 
 -- Weight cell ----------------------------------------------------------
 
@@ -156,11 +160,7 @@ end
 local function AddBackground(row, index)
     local bg = row:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints(row)
-    if index % 2 == 0 then
-        bg:SetTexture(0, 0, 0, 0.15)
-    else
-        bg:SetTexture(0, 0, 0, 0.05)
-    end
+    bg:SetTexture(0, 0, 0, (index % 2 == 0) and 0.15 or 0.05)
 end
 
 -- Creates a single pooled row frame attached to parent.

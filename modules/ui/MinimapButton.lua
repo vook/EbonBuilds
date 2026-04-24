@@ -79,7 +79,7 @@ end
 local function AttachClick(button)
     button:SetScript("OnClick", function(self, mouseButton)
         if mouseButton == "LeftButton" then
-            EbonBuilds.ConfigWindow.Toggle()
+            EbonBuilds.MainWindow.Toggle()
         end
     end)
 end

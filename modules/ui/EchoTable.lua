@@ -148,6 +148,15 @@ function EbonBuilds.EchoTable.Init(parent)
         end)
     end
 
+    if EbonBuilds.Build and EbonBuilds.Build.OnActiveChanged then
+        EbonBuilds.Build.OnActiveChanged(function()
+            -- Rebuild filtered view; weight cells read from active build on populate.
+            filteredList = EbonBuilds.Filters.Apply(echoList)
+            UpdateScrollRange()
+            RefreshRows()
+        end)
+    end
+
     UpdateScrollRange()
     RefreshRows()
 end
