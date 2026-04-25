@@ -1,6 +1,6 @@
 -- EbonBuilds: modules/ui/SettingsView.lua
 -- Responsibility: render the Automation tab (banish protection, echo ban,
--- novelty bonus, peak display and auto-behaviour thresholds).
+-- peak display and auto-behaviour thresholds).
 -- Exposes Mount/Unmount. Reads and writes into BuildForm state.settings
 -- so unsaved edits persist across tabs.
 -- Layout-heavy/declarative: template-file exception applies.
@@ -20,15 +20,15 @@ local FAMILY_ORDER = {
 }
 
 local THRESHOLDS = {
-    { key = "autoBanishPct",    label = "Auto-banish %",   hint = "Banish echoes below this % of peak." },
-    { key = "autoRerollPct",    label = "Auto-reroll %",   hint = "Reroll when the best offered echo is below this % of peak." },
-    { key = "autoFreezePct",    label = "Auto-freeze %",   hint = "Freeze echoes above this % of peak." },
-    { key = "freezePenaltyPct", label = "Freeze penalty %", hint = "Score penalty applied to frozen echoes." },
+    { key = "autoBanishPct",    label = "Auto-banish %",   hint = "Banish echoes below this % of peak.",       min = 0, max = 100, step = 1 },
+    { key = "autoRerollPct",    label = "Auto-reroll %",   hint = "Reroll when best offered is below this %.", min = 0, max = 300, step = 1 },
+    { key = "autoFreezePct",    label = "Auto-freeze %",   hint = "Freeze echoes above this % of peak.",       min = 0, max = 100, step = 1 },
+    { key = "freezePenaltyPct", label = "Freeze penalty %", hint = "Score penalty applied to frozen echoes.",  min = 0, max = 50,  step = 1 },
 }
 
 local viewFrame
 local scrollFrame, scrollChild, scrollBar
-local thresholdBoxes   = {}
+local thresholdSliders = {}
 local peakLabel
 local whitelistToggles = {}
 local whitelistWarningLabel
@@ -39,7 +39,7 @@ local echoBanFrame
 local echoBanScroll, echoBanScrollChild, echoBanScrollBar
 local echoBanAllButton
 
-local CONTENT_HEIGHT = 520
+local CONTENT_HEIGHT = 600
 
 local function CreateModeToggle(parent, x, y)
     local btn = CreateFrame("Button", nil, parent)
@@ -83,50 +83,6 @@ local function HighlightBorder(btn, on)
         btn._border = b
     end
     if on then btn._border:Show() else btn._border:Hide() end
-end
-
-------------------------------------------------------------------------
--- Integer edit box with backdrop
-------------------------------------------------------------------------
-
-local function CreateNumberEditBox(parent, width, height, allowNegative, allowDecimal)
-    local c = CreateFrame("Frame", nil, parent)
-    c:SetSize(width, height)
-    c:SetBackdrop({
-        bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 8, edgeSize = 8,
-        insets = { left = 2, right = 2, top = 2, bottom = 2 },
-    })
-    c:SetBackdropColor(0, 0, 0, 0.6)
-    c:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-
-    local box = CreateFrame("EditBox", nil, c)
-    box:SetPoint("TOPLEFT",     c, "TOPLEFT",     4, -4)
-    box:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", -4, 4)
-    box:SetFont("Fonts\\FRIZQT__.TTF", 12, "")
-    box:SetTextColor(1, 1, 1, 1)
-    box:SetJustifyH("CENTER")
-    box:SetAutoFocus(false)
-    box:SetMaxLetters(6)
-    box:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    box:SetScript("OnChar", function(self, char)
-        local valid = (char >= "0" and char <= "9")
-        if allowDecimal and char == "." then
-            local text = self:GetText()
-            if not text:find("%.") then valid = true end
-        end
-        if allowNegative and char == "-" then
-            if self:GetCursorPosition() == 0 then valid = true end
-        end
-        if not valid then
-            local pos  = self:GetCursorPosition()
-            local text = self:GetText()
-            self:SetText(string.sub(text, 1, pos) .. string.sub(text, pos + 2))
-            self:SetCursorPosition(pos)
-        end
-    end)
-    return box
 end
 
 ------------------------------------------------------------------------
@@ -457,15 +413,55 @@ end
 -- Threshold section (auto-banish / auto-reroll / auto-freeze / penalty)
 ------------------------------------------------------------------------
 
-local function ClampPct(n) if n < 0 then return 0 end if n > 100 then return 100 end return n end
+local SLIDER_W = 400
 
-local function CommitThresholdBox(box)
-    local settings = EbonBuilds.BuildForm.GetEditingSettings()
-    local num = tonumber(box:GetText())
-    if num and math.floor(num) == num then
-        settings[box.settingKey] = ClampPct(num)
-    end
-    box:SetText(tostring(settings[box.settingKey] or 0))
+local function CreateThresholdSlider(parent, x, y, entry)
+    local lbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lbl:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+    lbl:SetText(entry.label)
+
+    local slider = CreateFrame("Slider", nil, parent)
+    slider:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y - 20)
+    slider:SetWidth(SLIDER_W)
+    slider:SetHeight(24)
+    slider:SetOrientation("HORIZONTAL")
+    slider:SetMinMaxValues(entry.min, entry.max)
+    slider:SetValueStep(entry.step)
+
+    local track = slider:CreateTexture(nil, "BACKGROUND")
+    track:SetTexture(0.25, 0.25, 0.25, 0.8)
+    track:SetPoint("LEFT", slider, "LEFT", 0, 0)
+    track:SetPoint("RIGHT", slider, "RIGHT", 0, 0)
+    track:SetPoint("CENTER", slider, "CENTER", 0, 0)
+    track:SetHeight(6)
+
+    local thumb = slider:CreateTexture(nil, "OVERLAY")
+    thumb:SetTexture("Interface\\Buttons\\UI-SliderBar-Button-Horizontal")
+    thumb:SetWidth(16)
+    thumb:SetHeight(24)
+    slider:SetThumbTexture(thumb)
+
+    local valText = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    valText:SetPoint("LEFT", slider, "RIGHT", 8, 0)
+    valText:SetWidth(40)
+    valText:SetJustifyH("LEFT")
+    slider._valText = valText
+
+    local hint = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    hint:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", 0, -4)
+    hint:SetWidth(SLIDER_W)
+    hint:SetJustifyH("LEFT")
+    hint:SetText(entry.hint)
+
+    slider:SetScript("OnValueChanged", function(self, value)
+        local v = math.floor(value + 0.5)
+        valText:SetText(v .. "%")
+        local settings = EbonBuilds.BuildForm.GetEditingSettings()
+        settings[entry.key] = v
+        RefreshPeak()
+    end)
+
+    return slider
 end
 
 local function BuildThresholdsSection(parent, x, y)
@@ -475,34 +471,12 @@ local function BuildThresholdsSection(parent, x, y)
 
     local sub = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     sub:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -2)
-    sub:SetText("Values are percentages of the Peak score (0-100).")
+    sub:SetText("Values are percentages of the Peak score.")
 
     for i, entry in ipairs(THRESHOLDS) do
-        local col  = (i - 1) % 2
-        local row  = math.floor((i - 1) / 2)
-        local cx   = x + col * 260
-        local cy   = y - 38 - row * 56
-
-        local lbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        lbl:SetText(entry.label)
-        lbl:SetPoint("TOPLEFT", parent, "TOPLEFT", cx, cy)
-        lbl:SetWidth(120)
-        lbl:SetJustifyH("LEFT")
-
-        local box = CreateNumberEditBox(parent, 60, 22, false, false)
-        box:GetParent():SetPoint("TOPLEFT", parent, "TOPLEFT", cx + 130, cy - 2)
-        box.settingKey = entry.key
-        box:SetScript("OnEnterPressed",    function(self) CommitThresholdBox(self); self:ClearFocus() end)
-        box:SetScript("OnEditFocusLost",   function(self) CommitThresholdBox(self) end)
-        box:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
-
-        local hint = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        hint:SetPoint("TOPLEFT",  parent, "TOPLEFT", cx, cy - 30)
-        hint:SetWidth(240)
-        hint:SetJustifyH("LEFT")
-        hint:SetText(entry.hint)
-
-        thresholdBoxes[entry.key] = box
+        local cy = y - 38 - (i - 1) * 60
+        local slider = CreateThresholdSlider(parent, x + 10, cy, entry)
+        thresholdSliders[entry.key] = slider
     end
 end
 
@@ -513,7 +487,12 @@ end
 local function RefreshInputs()
     local settings = EbonBuilds.BuildForm.GetEditingSettings()
     for _, entry in ipairs(THRESHOLDS) do
-        thresholdBoxes[entry.key]:SetText(tostring(settings[entry.key] or 0))
+        local slider = thresholdSliders[entry.key]
+        if slider then
+            local val = settings[entry.key] or 0
+            slider:SetValue(val)
+            slider._valText:SetText(val .. "%")
+        end
     end
     RefreshWhitelistToggles()
     RefreshBanList()
@@ -526,7 +505,6 @@ local function RefreshInputs()
 end
 
 local function CommitFocusedBoxes()
-    for _, box in pairs(thresholdBoxes) do if box:HasFocus() then CommitThresholdBox(box) end end
 end
 
 ------------------------------------------------------------------------
