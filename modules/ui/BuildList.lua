@@ -70,7 +70,7 @@ local function PopulateRow(row, index, build, activeId)
     if build.id == activeId then row._active:Show() else row._active:Hide() end
     row:SetScript("OnClick", function()
         EbonBuilds.Build.SetActive(build.id)
-        EbonBuilds.ViewRouter.Show("weights")
+        EbonBuilds.ViewRouter.Show("buildTabs", { mode = "edit", build = build })
     end)
     row:Show()
 end
@@ -103,13 +103,13 @@ local function CreateNewBuildButton(parent)
     btn:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, 0)
     btn:SetText("+ New Build")
     btn:SetScript("OnClick", function()
-        EbonBuilds.ViewRouter.Show("buildForm", { mode = "create" })
+        EbonBuilds.ViewRouter.Show("buildTabs", { mode = "create" })
     end)
     return btn
 end
 
 local function CreateScrollArea(parent, topAnchor)
-    local sf = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
+    local sf = CreateFrame("ScrollFrame", "EbonBuildsBuildListSF", parent, "UIPanelScrollFrameTemplate")
     sf:SetPoint("TOPLEFT",     topAnchor, "BOTTOMLEFT",  0, -6)
     sf:SetPoint("BOTTOMRIGHT", parent,    "BOTTOMRIGHT", -22, 0)
 

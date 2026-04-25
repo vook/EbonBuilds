@@ -5,6 +5,16 @@
 
 EbonBuilds.BuildForm = {}
 
+local classChangeCallbacks = {}
+
+local function NotifyClassChange()
+    for i = 1, #classChangeCallbacks do classChangeCallbacks[i]() end
+end
+
+function EbonBuilds.BuildForm.OnClassChanged(fn)
+    classChangeCallbacks[#classChangeCallbacks + 1] = fn
+end
+
 local CLASS_ORDER = {
     "WARRIOR","PALADIN","HUNTER","ROGUE","PRIEST",
     "DEATHKNIGHT","SHAMAN","MAGE","WARLOCK","DRUID",
@@ -23,11 +33,22 @@ local state = {
     spec     = 1,
     comments = "",
     permanent = { nil, nil, nil, nil },
+    settings  = nil,
 }
+function EbonBuilds.BuildForm.GetEditingClass()
+    return state.class
+end
+function EbonBuilds.BuildForm.GetEditingSettings()
+    if not state.settings then
+        state.settings = EbonBuilds.Build.DefaultSettings()
+    end
+    return state.settings
+end
+
 local classButtons = {}
 local specButtons  = {}
 local slotButtons  = {}
-local titleBox, commentsBox, deleteBtn, cancelBtn, saveBtn
+local titleBox, commentsBox
 
 -- Global single-install hook: shift-click links go into the comments editbox
 -- when it is focused. Guarded so we never install twice.
@@ -115,10 +136,12 @@ local function BuildClassGrid(parent, xAnchor, yAnchor)
         SetClassIcon(btn._icon, token)
         btn:SetPoint("TOPLEFT", parent, "TOPLEFT", xAnchor + 56 + (i - 1) * 30, yAnchor + 6)
         btn:SetScript("OnClick", function()
+            if state.class == token then return end
             state.class = token
             if state.spec > 3 then state.spec = 1 end
             RefreshClassSelection()
             RefreshSpecButtons()
+            NotifyClassChange()
         end)
         classButtons[token] = btn
     end
@@ -315,6 +338,7 @@ local function OnSave()
         local b = EbonBuilds.Build.Create({
             title = state.title, class = state.class, spec = state.spec,
             comments = state.comments, permanentEchoes = { unpack(state.permanent) },
+            settings = state.settings,
         })
         state.mode = "edit"
         state.id   = b.id
@@ -323,20 +347,26 @@ local function OnSave()
         EbonBuilds.Build.Save(state.id, {
             title = state.title, class = state.class, spec = state.spec,
             comments = state.comments, permanentEchoes = { unpack(state.permanent) },
+            settings = state.settings,
         })
     end
     if EbonBuilds.BuildList and EbonBuilds.BuildList.Refresh then
         EbonBuilds.BuildList.Refresh()
     end
-    deleteBtn:Show()
-    cancelBtn:Hide()
+    if EbonBuilds.BuildTabs and EbonBuilds.BuildTabs.OnBuildSaved then
+        EbonBuilds.BuildTabs.OnBuildSaved()
+    end
+    if EbonBuilds.BuildTabs and EbonBuilds.BuildTabs.EnableEchoesTab then
+        EbonBuilds.BuildTabs.EnableEchoesTab()
+    end
 end
 
 local function OnCancel()
-    if EbonBuilds.Build.GetActive() then
-        EbonBuilds.ViewRouter.Show("weights")
+    local active = EbonBuilds.Build.GetActive()
+    if active then
+        EbonBuilds.ViewRouter.Show("buildTabs", { mode = "edit", build = active })
     else
-        viewFrame:Hide()
+        EbonBuilds.MainWindow._frame:Hide()
     end
 end
 
@@ -346,32 +376,17 @@ local function OnDelete()
     if EbonBuilds.BuildList and EbonBuilds.BuildList.Refresh then
         EbonBuilds.BuildList.Refresh()
     end
-    if EbonBuilds.Build.GetActive() then
-        EbonBuilds.ViewRouter.Show("weights")
+    local active = EbonBuilds.Build.GetActive()
+    if active then
+        EbonBuilds.ViewRouter.Show("buildTabs", { mode = "edit", build = active })
     else
-        EbonBuilds.ViewRouter.Show("buildForm", { mode = "create" })
+        EbonBuilds.ViewRouter.Show("buildTabs", { mode = "create" })
     end
 end
 
-local function BuildFooter(parent)
-    saveBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    saveBtn:SetSize(90, 22)
-    saveBtn:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -10, 10)
-    saveBtn:SetText("Save")
-    saveBtn:SetScript("OnClick", OnSave)
-
-    cancelBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    cancelBtn:SetSize(90, 22)
-    cancelBtn:SetPoint("RIGHT", saveBtn, "LEFT", -6, 0)
-    cancelBtn:SetText("Cancel")
-    cancelBtn:SetScript("OnClick", OnCancel)
-
-    deleteBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    deleteBtn:SetSize(90, 22)
-    deleteBtn:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 10, 10)
-    deleteBtn:SetText("Delete")
-    deleteBtn:SetScript("OnClick", OnDelete)
-end
+EbonBuilds.BuildForm.Save   = OnSave
+EbonBuilds.BuildForm.Cancel = OnCancel
+EbonBuilds.BuildForm.Delete = OnDelete
 
 ------------------------------------------------------------------------
 -- Load/Reset state
@@ -394,6 +409,20 @@ local function ApplyStateToInputs()
     end
 end
 
+local function CloneSettings(src)
+    local dst = EbonBuilds.Build.DefaultSettings()
+    if not src then return dst end
+    for k, v in pairs(src) do
+        if type(v) == "table" then
+            dst[k] = dst[k] or {}
+            for k2, v2 in pairs(v) do dst[k][k2] = v2 end
+        else
+            dst[k] = v
+        end
+    end
+    return dst
+end
+
 local function LoadFromBuild(build)
     state.mode     = "edit"
     state.id       = build.id
@@ -401,6 +430,7 @@ local function LoadFromBuild(build)
     state.class    = build.class
     state.spec     = build.spec     or 1
     state.comments = build.comments or ""
+    state.settings = CloneSettings(build.settings)
     for i = 1, 4 do state.permanent[i] = build.permanentEchoes and build.permanentEchoes[i] or nil end
 end
 
@@ -411,35 +441,46 @@ local function LoadDefaults()
     state.class    = EbonBuilds.Build.PlayerClassToken()
     state.spec     = EbonBuilds.Build.PlayerTopTalentTab()
     state.comments = ""
+    state.settings = EbonBuilds.Build.DefaultSettings()
     for i = 1, 4 do state.permanent[i] = nil end
 end
 
 ------------------------------------------------------------------------
--- View interface
+-- Public Mount/Unmount
 ------------------------------------------------------------------------
 
-local view = {}
+local function TargetMatchesState(context)
+    if context.mode == "edit" and context.build then
+        return state.mode == "edit" and state.id == context.build.id
+    end
+    return state.mode == "create" and state.id == nil and state.class ~= nil
+end
 
-function view.Show(container, context)
+function EbonBuilds.BuildForm.Mount(container, context)
     viewFrame:SetParent(container)
     viewFrame:ClearAllPoints()
     viewFrame:SetAllPoints(container)
 
     context = context or {}
-    if context.mode == "edit" and context.build then
-        LoadFromBuild(context.build)
-        deleteBtn:Show()
-        cancelBtn:Hide()
-    else
-        LoadDefaults()
-        deleteBtn:Hide()
-        cancelBtn:Show()
+    local keepState = TargetMatchesState(context)
+    if not keepState then
+        if context.mode == "edit" and context.build then
+            LoadFromBuild(context.build)
+        else
+            LoadDefaults()
+        end
     end
+
     ApplyStateToInputs()
+    NotifyClassChange()
     viewFrame:Show()
 end
 
-function view.Hide()
+function EbonBuilds.BuildForm.Unmount()
+    if viewFrame and titleBox and commentsBox then
+        state.title    = titleBox:GetText() or state.title
+        state.comments = commentsBox:GetText() or state.comments
+    end
     if viewFrame then viewFrame:Hide() end
 end
 
@@ -459,14 +500,11 @@ local function BuildViewFrame()
     BuildTitleField(f, 10, -124)
     BuildPermanentSlots(f, 10, -160)
     BuildDescriptionField(f, 10, -210, 180)
-    BuildFooter(f)
-
     return f
 end
 
 function EbonBuilds.BuildForm.Init()
     viewFrame = BuildViewFrame()
     viewFrame:Hide()
-    EbonBuilds.ViewRouter.Register("buildForm", view)
     InstallLinkHook()
 end

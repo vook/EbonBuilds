@@ -9,7 +9,6 @@ local function OnAddonLoaded(addonName)
     if addonName ~= "EbonBuilds" then return end
 
     if not ProjectEbonhold then
-        print("EbonBuilds: ProjectEbonhold not found. Aborting.")
         return
     end
 

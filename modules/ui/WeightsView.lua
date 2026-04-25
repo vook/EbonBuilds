@@ -1,15 +1,13 @@
 -- EbonBuilds: modules/ui/WeightsView.lua
--- Responsibility: host the Filters bar + EchoTable inside the ViewRouter right
--- panel. Keeps a single view container that is re-shown on demand.
+-- Responsibility: host the Filters bar + EchoTable. Exposes Mount/Unmount so
+-- any container (e.g. a tab page) can embed it on demand.
 
 EbonBuilds.WeightsView = {}
 
 local viewFrame
-local initialised = false
 
 local function BuildViewFrame(parent)
     local f = CreateFrame("Frame", nil, parent)
-    f:SetAllPoints(parent)
 
     local header = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     header:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -10)
@@ -23,7 +21,6 @@ local function EnsureBuilt(container)
     viewFrame = BuildViewFrame(container)
     EbonBuilds.Filters.Init(viewFrame)
     EbonBuilds.EchoTable.Init(viewFrame)
-    initialised = true
 end
 
 local function RefreshHeader()
@@ -36,9 +33,7 @@ local function RefreshHeader()
     end
 end
 
-local view = {}
-
-function view.Show(container, _context)
+function EbonBuilds.WeightsView.Mount(container)
     EnsureBuilt(container)
     viewFrame:SetParent(container)
     viewFrame:ClearAllPoints()
@@ -47,12 +42,11 @@ function view.Show(container, _context)
     viewFrame:Show()
 end
 
-function view.Hide()
+function EbonBuilds.WeightsView.Unmount()
     if viewFrame then viewFrame:Hide() end
 end
 
 function EbonBuilds.WeightsView.Init()
-    EbonBuilds.ViewRouter.Register("weights", view)
     if EbonBuilds.Build and EbonBuilds.Build.OnActiveChanged then
         EbonBuilds.Build.OnActiveChanged(RefreshHeader)
     end

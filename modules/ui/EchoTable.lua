@@ -10,6 +10,33 @@ local HEADER_HEIGHT= 24
 local ROW_HEIGHT   = 36
 local COL_ICON     = 40
 local COL_WEIGHT   = 80
+local COL_SCORE    = 140
+
+local CLASS_BITS = {
+    WARRIOR = 1, PALADIN = 2, HUNTER = 4, ROGUE = 8, PRIEST = 16,
+    DEATHKNIGHT = 32, SHAMAN = 64, MAGE = 128, WARLOCK = 256, DRUID = 1024,
+}
+
+local function ApplyClassFilter(list)
+    local token
+    if EbonBuilds.BuildForm and EbonBuilds.BuildForm.GetEditingClass then
+        token = EbonBuilds.BuildForm.GetEditingClass()
+    end
+    if not token then
+        local build = EbonBuilds.Build.GetActive()
+        token = build and build.class
+    end
+    local bitVal = token and CLASS_BITS[token]
+    if not bitVal then return list end
+    local out = {}
+    for i = 1, #list do
+        local e = list[i]
+        if not e.classMask or e.classMask == 0 or bit.band(e.classMask, bitVal) ~= 0 then
+            out[#out + 1] = e
+        end
+    end
+    return out
+end
 
 local echoList     = {}
 local filteredList = {}
@@ -20,14 +47,14 @@ local scrollFrame, scrollChild, scrollBar
 -- Headers
 ------------------------------------------------------------------------
 
-local function CreateHeaders(parent, top, left, width)
-    local function MakeHeader(text, x)
-        local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        fs:SetPoint("TOPLEFT", parent, "TOPLEFT", x, top)
-        fs:SetText(text)
-    end
-    MakeHeader("Name",   left + COL_ICON + 4)
-    MakeHeader("Weight", left + width - COL_WEIGHT)
+local function CreateHeaders(parent, top, left)
+    local nameHdr = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    nameHdr:SetPoint("TOPLEFT", parent, "TOPLEFT", left + COL_ICON + 4, top)
+    nameHdr:SetText("Name")
+
+    local weightHdr = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    weightHdr:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -(PADDING + 28), top)
+    weightHdr:SetText("Weight")
 end
 
 ------------------------------------------------------------------------
@@ -63,6 +90,11 @@ local function RefreshRows()
     end
 end
 
+local function SyncChildWidth(sf, child)
+    local w = sf:GetWidth()
+    if w and w > 0 then child:SetWidth(w) end
+end
+
 ------------------------------------------------------------------------
 -- ScrollBar wiring
 ------------------------------------------------------------------------
@@ -80,6 +112,7 @@ local function WireScrollBar(sf, bar)
     end)
 
     sf:SetScript("OnSizeChanged", function()
+        SyncChildWidth(sf, scrollChild)
         UpdateScrollRange()
         RefreshRows()
     end)
@@ -105,8 +138,7 @@ local function CreateScrollFrame(parent, x, y)
     sf:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -x - 20, PADDING)
 
     local child = CreateFrame("Frame", nil, sf)
-    child:SetWidth(parent:GetWidth() - x * 2 - 20)
-    child:SetHeight(math.max(1, parent:GetHeight() - PADDING * 2))
+    child:SetSize(1, 1)
     sf:SetScrollChild(child)
     return sf, child
 end
@@ -119,13 +151,12 @@ local FILTER_BAR_OFFSET = 34
 
 function EbonBuilds.EchoTable.Init(parent)
     echoList     = EbonBuilds.EchoTableRows.BuildSortedList()
-    filteredList = echoList
+    filteredList = ApplyClassFilter(echoList)
 
     local left  = PADDING
     local top   = -(TITLE_HEIGHT + PADDING) - FILTER_BAR_OFFSET
-    local width = parent:GetWidth() - PADDING * 2
 
-    CreateHeaders(parent, top, left, width)
+    CreateHeaders(parent, top, left)
 
     local sfTop = top - HEADER_HEIGHT
     scrollFrame, scrollChild = CreateScrollFrame(parent, left, sfTop)
@@ -135,28 +166,34 @@ function EbonBuilds.EchoTable.Init(parent)
     WireScrollBar(scrollFrame, scrollBar)
 
     scrollFrame:SetScript("OnShow", function()
+        SyncChildWidth(scrollFrame, scrollChild)
         UpdateScrollRange()
         RefreshRows()
     end)
 
     if EbonBuilds.Filters and EbonBuilds.Filters.OnChange then
         EbonBuilds.Filters.OnChange(function()
-            filteredList = EbonBuilds.Filters.Apply(echoList)
+            filteredList = EbonBuilds.Filters.Apply(ApplyClassFilter(echoList))
             UpdateScrollRange()
             scrollBar:SetValue(0)
             RefreshRows()
         end)
     end
 
-    if EbonBuilds.Build and EbonBuilds.Build.OnActiveChanged then
-        EbonBuilds.Build.OnActiveChanged(function()
-            -- Rebuild filtered view; weight cells read from active build on populate.
-            filteredList = EbonBuilds.Filters.Apply(echoList)
-            UpdateScrollRange()
-            RefreshRows()
-        end)
+    local function Rebuild()
+        filteredList = EbonBuilds.Filters.Apply(ApplyClassFilter(echoList))
+        UpdateScrollRange()
+        RefreshRows()
     end
 
+    if EbonBuilds.Build and EbonBuilds.Build.OnActiveChanged then
+        EbonBuilds.Build.OnActiveChanged(Rebuild)
+    end
+    if EbonBuilds.BuildForm and EbonBuilds.BuildForm.OnClassChanged then
+        EbonBuilds.BuildForm.OnClassChanged(Rebuild)
+    end
+
+    SyncChildWidth(scrollFrame, scrollChild)
     UpdateScrollRange()
     RefreshRows()
 end

@@ -5,7 +5,12 @@ EbonBuilds.EchoTableRows = {}
 
 local COL_ICON   = 40
 local COL_WEIGHT = 80
+local COL_SCORE  = 140
 local ROW_HEIGHT = 36
+
+local QUALITY_COLORS = {
+    [0] = "ffffff", [1] = "19ff19", [2] = "0066ff", [3] = "cc66ff", [4] = "ff8000",
+}
 
 -- Data preparation -----------------------------------------------------
 
@@ -28,13 +33,17 @@ local function BuildBestByName()
         if raw and raw ~= "" then
             local name = StripQualitySuffix(raw)
             local existing = best[name]
+            local mask = data.classMask or 0
             if not existing then
-                existing = { spellId = spellId, quality = data.quality, qualities = {}, families = data.families or {} }
+                existing = { spellId = spellId, quality = data.quality, qualities = {}, families = data.families or {}, classMask = mask }
                 best[name] = existing
-            elseif data.quality > existing.quality then
-                existing.spellId  = spellId
-                existing.quality  = data.quality
-                existing.families = data.families or {}
+            else
+                existing.classMask = bit.bor(existing.classMask or 0, mask)
+                if data.quality > existing.quality then
+                    existing.spellId  = spellId
+                    existing.quality  = data.quality
+                    existing.families = data.families or {}
+                end
             end
             existing.qualities[data.quality] = true
         end
@@ -51,10 +60,25 @@ function EbonBuilds.EchoTableRows.BuildSortedList()
         list[#list + 1] = {
             spellId = entry.spellId, name = name, quality = entry.quality,
             qualities = entry.qualities, families = entry.families,
+            classMask = entry.classMask or 0,
         }
     end
     table.sort(list, function(a, b) return a.name < b.name end)
     return list
+end
+
+local function UpdateScores(row, entry)
+    if not row.scoreLabel then return end
+    local weight = EbonBuilds.Weights.Get(entry.name) or 0
+    local settings = EbonBuilds.Scoring.GetEffectiveSettings()
+    local parts = {}
+    for q = 0, 4 do
+        if entry.qualities[q] then
+            local score = EbonBuilds.Scoring.ScorePerQuality(entry, weight, settings, q)
+            parts[#parts + 1] = string.format("|cff%s%d|r", QUALITY_COLORS[q], score)
+        end
+    end
+    row.scoreLabel:SetText(table.concat(parts, " - "))
 end
 
 -- Icon cell ------------------------------------------------------------
@@ -98,18 +122,16 @@ EbonBuilds.EchoTableRows.WireIconTooltip = WireIconTooltip
 
 -- Weight cell ----------------------------------------------------------
 
-local function RestoreWeight(editBox)
-    editBox:SetText(tostring(EbonBuilds.Weights.Get(editBox.echoName)))
-end
-
-local function CommitWeight(editBox)
-    local raw = editBox:GetText()
+local function ApplyWeight(editBox, raw)
     local num = tonumber(raw)
     if num and math.floor(num) == num and num >= 0 then
         EbonBuilds.Weights.Set(editBox.echoName, num)
-        editBox:SetText(tostring(EbonBuilds.Weights.Get(editBox.echoName)))
-    else
-        RestoreWeight(editBox)
+    end
+    editBox:SetText(tostring(EbonBuilds.Weights.Get(editBox.echoName)))
+    if editBox._row and editBox._row.scoreLabel then
+        local row = editBox._row
+        local entry = { name = editBox.echoName, qualities = row._qualities, families = row._families }
+        UpdateScores(row, entry)
     end
 end
 
@@ -123,17 +145,18 @@ local function WireWeightBox(editBox)
         end
     end)
     editBox:SetScript("OnEnterPressed", function(self)
-        CommitWeight(self)
-        self:ClearFocus()
+        ApplyWeight(self, self:GetText())
     end)
-    editBox:SetScript("OnEditFocusLost",   function(self) CommitWeight(self) end)
+    editBox:SetScript("OnEditFocusLost", function(self)
+        ApplyWeight(self, self:GetText())
+    end)
     editBox:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
 end
 
-local function CreateWeightBox(row)
-    local editContainer = CreateFrame("Frame", nil, row)
+local function CreateWeightBox(parentRow)
+    local editContainer = CreateFrame("Frame", nil, parentRow)
     editContainer:SetSize(58, 22)
-    editContainer:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+    editContainer:SetPoint("RIGHT", parentRow, "RIGHT", -8, 0)
     editContainer:SetBackdrop({
         bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -151,6 +174,7 @@ local function CreateWeightBox(row)
     box:SetJustifyH("CENTER")
     box:SetAutoFocus(false)
     box:SetMaxLetters(6)
+    box._row = parentRow
     WireWeightBox(box)
     return box
 end
@@ -177,14 +201,20 @@ function EbonBuilds.EchoTableRows.CreateRow(parent, index)
 
     local nameLabel = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     nameLabel:SetPoint("LEFT",  iconFrame, "RIGHT", 4, 0)
-    nameLabel:SetPoint("RIGHT", row,       "RIGHT", -(COL_WEIGHT + 8), 0)
+    nameLabel:SetPoint("RIGHT", row,       "RIGHT", -(COL_WEIGHT + COL_SCORE + 24), 0)
     nameLabel:SetJustifyH("LEFT")
+
+    local scoreLabel = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    scoreLabel:SetPoint("RIGHT", row, "RIGHT", -(COL_WEIGHT + 16), 0)
+    scoreLabel:SetWidth(COL_SCORE)
+    scoreLabel:SetJustifyH("RIGHT")
 
     local weightBox = CreateWeightBox(row)
 
-    row.iconFrame = iconFrame
-    row.nameLabel = nameLabel
-    row.weightBox = weightBox
+    row.iconFrame  = iconFrame
+    row.nameLabel  = nameLabel
+    row.scoreLabel = scoreLabel
+    row.weightBox  = weightBox
     row:Hide()
     return row
 end
@@ -196,5 +226,8 @@ function EbonBuilds.EchoTableRows.Populate(row, yOffset, entry)
     row.nameLabel:SetText(entry.name)
     row.weightBox.echoName = entry.name
     row.weightBox:SetText(tostring(EbonBuilds.Weights.Get(entry.name)))
+    row._qualities = entry.qualities
+    row._families  = entry.families
+    UpdateScores(row, entry)
     row:Show()
 end

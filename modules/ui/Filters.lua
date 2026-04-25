@@ -3,7 +3,7 @@
 
 EbonBuilds.Filters = {}
 
-local FAMILIES = { "Tank", "Survivability", "Healer", "Caster DPS", "Melee DPS", "Ranged DPS" }
+local FAMILIES = { "Tank", "Survivability", "Healer", "Caster DPS", "Melee DPS", "Ranged DPS", "No family" }
 local QUALITY_LABELS = { "All", "Common", "Uncommon", "Rare", "Epic", "Legendary" }
 
 local state = {
@@ -35,11 +35,17 @@ end
 local function MatchesFamilies(entry)
     if not next(state.families) then return true end
     local has = {}
+    local hasAnyFamily = false
     for _, fam in ipairs(entry.families or {}) do
         has[fam] = true
+        hasAnyFamily = true
     end
     for required in pairs(state.families) do
-        if not has[required] then return false end
+        if required == "No family" then
+            if hasAnyFamily then return false end
+        else
+            if not has[required] then return false end
+        end
     end
     return true
 end
