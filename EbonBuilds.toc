@@ -18,6 +18,7 @@ modules/ui/EchoTableRows.lua
 modules/ui/EchoTable.lua
 modules/build/Scoring.lua
 modules/ui/WeightsView.lua
+modules/ui/WelcomeView.lua
 modules/ui/BonusView.lua
 modules/ui/SettingsView.lua
 modules/ui/BuildTabs.lua

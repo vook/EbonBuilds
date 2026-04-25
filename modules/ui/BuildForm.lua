@@ -23,6 +23,13 @@ local CLASS_TEXTURE = "Interface\\TargetingFrame\\UI-Classes-Circles"
 local QUALITY_COLOR = {
     [0]="ffffff",[1]="19ff19",[2]="0066ff",[3]="cc66ff",[4]="ff8000",
 }
+local QUALITY_BORDER_COLORS = {
+    [0] = { 1.0, 1.0, 1.0 },
+    [1] = { 30/255, 1.0, 0.0 },
+    [2] = { 0.0, 112/255, 221/255 },
+    [3] = { 163/255, 53/255, 238/255 },
+    [4] = { 1.0, 128/255, 0.0 },
+}
 
 local viewFrame
 local state = {
@@ -43,6 +50,11 @@ function EbonBuilds.BuildForm.GetEditingSettings()
         state.settings = EbonBuilds.Build.DefaultSettings()
     end
     return state.settings
+end
+
+function EbonBuilds.BuildForm.GetEditingPermanentEchoes()
+    if not state.mode then return nil end
+    return state.permanent
 end
 
 local classButtons = {}
@@ -216,18 +228,41 @@ local function BuildPermanentSlots(parent, x, y)
         btn:EnableMouse(true)
         btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         EbonBuilds.EchoTableRows.WireIconTooltip(btn)
+
+        local border = btn:CreateTexture(nil, "OVERLAY")
+        border:SetAllPoints(btn)
+        border:SetTexture("Interface\\Buttons\\CheckButtonHilight")
+        border:SetBlendMode("ADD")
+        border:Hide()
+        btn._qualityBorder = border
+
         btn:SetScript("OnClick", function(_, button)
             if button == "RightButton" then
                 state.permanent[i] = nil
                 btn.spellId = nil
+                btn._quality = nil
                 btn._icon:SetTexture("Interface\\Buttons\\UI-EmptySlot")
+                btn._qualityBorder:Hide()
                 return
             end
-            EbonBuilds.EchoPicker.Show(function(spellId)
+            local settings = EbonBuilds.BuildForm.GetEditingSettings()
+            local banList = settings and settings.echoBanList or {}
+            local allList = EbonBuilds.EchoTableRows.BuildAllQualitiesList()
+            local filtered = {}
+            for _, entry in ipairs(allList) do
+                if not banList[entry.spellId] then
+                    filtered[#filtered + 1] = entry
+                end
+            end
+            EbonBuilds.EchoPicker.Show(function(spellId, quality, name)
                 state.permanent[i] = spellId
                 btn.spellId = spellId
+                btn._quality = quality
                 btn._icon:SetTexture(select(3, GetSpellInfo(spellId)))
-            end)
+                local bc = QUALITY_BORDER_COLORS[quality] or QUALITY_BORDER_COLORS[0]
+                btn._qualityBorder:SetVertexColor(bc[1], bc[2], bc[3])
+                btn._qualityBorder:Show()
+            end, filtered)
         end)
         slotButtons[i] = btn
     end
@@ -400,11 +435,20 @@ local function ApplyStateToInputs()
     RefreshSpecButtons()
     for i = 1, 4 do
         local id = state.permanent[i]
-        slotButtons[i].spellId = id
+        local btn = slotButtons[i]
+        btn.spellId = id
         if id then
-            slotButtons[i]._icon:SetTexture(select(3, GetSpellInfo(id)))
+            btn._icon:SetTexture(select(3, GetSpellInfo(id)))
+            local data = ProjectEbonhold.PerkDatabase[id]
+            local quality = data and data.quality or 0
+            btn._quality = quality
+            local bc = QUALITY_BORDER_COLORS[quality] or QUALITY_BORDER_COLORS[0]
+            btn._qualityBorder:SetVertexColor(bc[1], bc[2], bc[3])
+            btn._qualityBorder:Show()
         else
-            slotButtons[i]._icon:SetTexture("Interface\\Buttons\\UI-EmptySlot")
+            btn._icon:SetTexture("Interface\\Buttons\\UI-EmptySlot")
+            btn._quality = nil
+            btn._qualityBorder:Hide()
         end
     end
 end

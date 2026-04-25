@@ -90,18 +90,38 @@ function EbonBuilds.MainWindow.Init()
     EbonBuilds.SettingsView.Init()
     EbonBuilds.BuildTabs.Init()
 
+    EbonBuilds.ViewRouter.Register("welcome", {
+        Show = function(container, _)
+            EbonBuilds.WelcomeView.Mount(container)
+        end,
+        Hide = function()
+            EbonBuilds.WelcomeView.Unmount()
+        end,
+    })
+
+    EbonBuilds.MainWindow._ShowInitialView()
+end
+
+function EbonBuilds.MainWindow._ShowInitialView()
     local active = EbonBuilds.Build.GetActive()
     if active then
         EbonBuilds.ViewRouter.Show("buildTabs", { mode = "edit", build = active })
-    else
+    elseif #EbonBuilds.Build.List() > 0 then
         EbonBuilds.ViewRouter.Show("buildTabs", { mode = "create" })
+    else
+        EbonBuilds.ViewRouter.Show("welcome")
     end
 end
 
 function EbonBuilds.MainWindow.Toggle()
     local frame = EbonBuilds.MainWindow._frame
     if not frame then return end
-    if frame:IsShown() then frame:Hide() else frame:Show() end
+    if frame:IsShown() then
+        frame:Hide()
+    else
+        EbonBuilds.MainWindow._ShowInitialView()
+        frame:Show()
+    end
 end
 
 function EbonBuilds.MainWindow.GetRightPanel()

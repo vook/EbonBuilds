@@ -94,6 +94,28 @@ function EbonBuilds.Scoring.ComputePeak(classToken, settings)
     return bestName, bestScore or 0
 end
 
+function EbonBuilds.Scoring.GetEffectivePermanentEchoes()
+    if EbonBuilds.BuildForm and EbonBuilds.BuildForm.GetEditingPermanentEchoes then
+        local p = EbonBuilds.BuildForm.GetEditingPermanentEchoes()
+        if p then return p end
+    end
+    local build = EbonBuilds.Build.GetActive()
+    if build and build.permanentEchoes then return build.permanentEchoes end
+    return { nil, nil, nil, nil }
+end
+
+function EbonBuilds.Scoring.IsPermanent(spellId)
+    if not spellId then return false end
+    local permanents = EbonBuilds.Scoring.GetEffectivePermanentEchoes()
+    if not permanents then return false end
+    for i = 1, 4 do
+        if permanents[i] and permanents[i] == spellId then
+            return true
+        end
+    end
+    return false
+end
+
 function EbonBuilds.Scoring.IsBanned(spellId)
     if not spellId then return false end
     local settings = EbonBuilds.Scoring.GetEffectiveSettings()

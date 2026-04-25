@@ -98,7 +98,9 @@ local function UpdateScores(row, entry)
     for q = 0, 4 do
         if entry.qualities[q] then
             local spellId = entry.spellIds and entry.spellIds[q]
-            if spellId and EbonBuilds.Scoring.IsBanned(spellId) then
+            if spellId and EbonBuilds.Scoring.IsPermanent(spellId) then
+                parts[#parts + 1] = string.format("|cff%sPermanent|r", QUALITY_COLORS[q])
+            elseif spellId and EbonBuilds.Scoring.IsBanned(spellId) then
                 parts[#parts + 1] = string.format("|cff%sBanned|r", QUALITY_COLORS[q])
             else
                 local score = EbonBuilds.Scoring.ScorePerQuality(entry, weight, settings, q)

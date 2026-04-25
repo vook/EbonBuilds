@@ -328,7 +328,7 @@ local function BuildEchoBanSection(parent, x, y)
         local banList = settings.echoBanList or {}
         local filtered = {}
         for _, entry in ipairs(allList) do
-            if not banList[entry.spellId] then
+            if not banList[entry.spellId] and not EbonBuilds.Scoring.IsPermanent(entry.spellId) then
                 filtered[#filtered + 1] = entry
             end
         end
