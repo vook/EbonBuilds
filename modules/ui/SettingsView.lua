@@ -238,12 +238,12 @@ local function RefreshBanList()
             local icon = btn:CreateTexture(nil, "ARTWORK")
             icon:SetPoint("TOPLEFT",     btn, "TOPLEFT",     2, -2)
             icon:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2,  2)
+            icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
             btn._icon = icon
 
-            local border = btn:CreateTexture(nil, "OVERLAY")
-            border:SetAllPoints(btn)
-            border:SetTexture("Interface\\Buttons\\CheckButtonHilight")
-            border:SetBlendMode("ADD")
+            local border = btn:CreateTexture(nil, "BORDER")
+            border:SetPoint("TOPLEFT",     btn, "TOPLEFT",     -1,  1)
+            border:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT",  1, -1)
             btn._border = border
 
             btn:RegisterForClicks("LeftButtonUp")
@@ -280,7 +280,7 @@ local function RefreshBanList()
         btn.spellId = spellId
         btn._spellId = spellId
         btn._quality = quality
-        btn._border:SetVertexColor(borderColor[1], borderColor[2], borderColor[3])
+        btn._border:SetTexture(borderColor[1], borderColor[2], borderColor[3])
         btn._border:Show()
         local col = (idx - 1) % cols
         local row = math.floor((idx - 1) / cols)

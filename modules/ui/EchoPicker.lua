@@ -69,6 +69,7 @@ local function CreateRow(parent, index)
     icon:SetWidth(20)
     icon:SetHeight(20)
     icon:SetPoint("LEFT", row, "LEFT", 4, 0)
+    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     row._icon = icon
 
     local label = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")

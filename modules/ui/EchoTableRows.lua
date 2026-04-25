@@ -125,6 +125,7 @@ local function CreateIconFrame(row)
     tex:SetWidth(28)
     tex:SetHeight(28)
     tex:SetPoint("CENTER", frame, "CENTER")
+    tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     frame.icon = tex
     return frame
 end

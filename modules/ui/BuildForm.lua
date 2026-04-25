@@ -131,6 +131,7 @@ local function CreateIconButton(parent, size)
     btn:SetHeight(size)
     local icon = btn:CreateTexture(nil, "ARTWORK")
     icon:SetAllPoints(btn)
+    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     btn._icon = icon
     return btn
 end
@@ -201,7 +202,7 @@ local function CreateBackdropEditBox(parent, width, height, multi)
         box:SetMaxLetters(0)
         box:EnableMouse(true)
     else
-        box:SetMaxLetters(120)
+        box:SetMaxLetters(40)
     end
     box:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     return box, c
@@ -229,10 +230,9 @@ local function BuildPermanentSlots(parent, x, y)
         btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         EbonBuilds.EchoTableRows.WireIconTooltip(btn)
 
-        local border = btn:CreateTexture(nil, "OVERLAY")
-        border:SetAllPoints(btn)
-        border:SetTexture("Interface\\Buttons\\CheckButtonHilight")
-        border:SetBlendMode("ADD")
+        local border = btn:CreateTexture(nil, "BORDER")
+        border:SetPoint("TOPLEFT",     btn, "TOPLEFT",     -2,  2)
+        border:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT",  2, -2)
         border:Hide()
         btn._qualityBorder = border
 
@@ -260,7 +260,7 @@ local function BuildPermanentSlots(parent, x, y)
                 btn._quality = quality
                 btn._icon:SetTexture(select(3, GetSpellInfo(spellId)))
                 local bc = QUALITY_BORDER_COLORS[quality] or QUALITY_BORDER_COLORS[0]
-                btn._qualityBorder:SetVertexColor(bc[1], bc[2], bc[3])
+                btn._qualityBorder:SetTexture(bc[1], bc[2], bc[3])
                 btn._qualityBorder:Show()
             end, filtered)
         end)
@@ -443,7 +443,7 @@ local function ApplyStateToInputs()
             local quality = data and data.quality or 0
             btn._quality = quality
             local bc = QUALITY_BORDER_COLORS[quality] or QUALITY_BORDER_COLORS[0]
-            btn._qualityBorder:SetVertexColor(bc[1], bc[2], bc[3])
+            btn._qualityBorder:SetTexture(bc[1], bc[2], bc[3])
             btn._qualityBorder:Show()
         else
             btn._icon:SetTexture("Interface\\Buttons\\UI-EmptySlot")
@@ -487,6 +487,7 @@ local function LoadDefaults()
     state.comments = ""
     state.settings = EbonBuilds.Build.DefaultSettings()
     for i = 1, 4 do state.permanent[i] = nil end
+    EbonBuildsDB.pendingWeights = {}
 end
 
 ------------------------------------------------------------------------
@@ -497,7 +498,7 @@ local function TargetMatchesState(context)
     if context.mode == "edit" and context.build then
         return state.mode == "edit" and state.id == context.build.id
     end
-    return state.mode == "create" and state.id == nil and state.class ~= nil
+    return false
 end
 
 function EbonBuilds.BuildForm.Mount(container, context)
