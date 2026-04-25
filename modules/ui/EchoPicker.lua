@@ -181,9 +181,15 @@ end
 -- Public
 ------------------------------------------------------------------------
 
-function EbonBuilds.EchoPicker.Show(callback)
+function EbonBuilds.EchoPicker.Show(callback, dataSource)
     if not frame then
-        frame      = BuildFrame()
+        frame = BuildFrame()
+    end
+    if type(dataSource) == "table" then
+        allEntries = dataSource
+    elseif dataSource then
+        allEntries = EbonBuilds.EchoTableRows.BuildAllQualitiesList()
+    else
         allEntries = BuildEntries()
     end
     onPick = callback

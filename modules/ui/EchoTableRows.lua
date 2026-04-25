@@ -35,7 +35,7 @@ local function BuildBestByName()
             local existing = best[name]
             local mask = data.classMask or 0
             if not existing then
-                existing = { spellId = spellId, quality = data.quality, qualities = {}, families = data.families or {}, classMask = mask }
+                existing = { spellId = spellId, quality = data.quality, qualities = {}, families = data.families or {}, classMask = mask, spellIds = {} }
                 best[name] = existing
             else
                 existing.classMask = bit.bor(existing.classMask or 0, mask)
@@ -46,6 +46,7 @@ local function BuildBestByName()
                 end
             end
             existing.qualities[data.quality] = true
+            existing.spellIds[data.quality] = spellId
         end
     end
     return best
@@ -61,9 +62,31 @@ function EbonBuilds.EchoTableRows.BuildSortedList()
             spellId = entry.spellId, name = name, quality = entry.quality,
             qualities = entry.qualities, families = entry.families,
             classMask = entry.classMask or 0,
+            spellIds = entry.spellIds,
         }
     end
     table.sort(list, function(a, b) return a.name < b.name end)
+    return list
+end
+
+function EbonBuilds.EchoTableRows.BuildAllQualitiesList()
+    local list = {}
+    for spellId, data in pairs(ProjectEbonhold.PerkDatabase) do
+        local raw = data.comment
+        if raw and raw ~= "" then
+            local name = StripQualitySuffix(raw)
+            list[#list + 1] = {
+                spellId = spellId,
+                name = name,
+                quality = data.quality,
+                classMask = data.classMask or 0,
+            }
+        end
+    end
+    table.sort(list, function(a, b)
+        if a.name ~= b.name then return a.name < b.name end
+        return a.quality < b.quality
+    end)
     return list
 end
 
@@ -74,8 +97,13 @@ local function UpdateScores(row, entry)
     local parts = {}
     for q = 0, 4 do
         if entry.qualities[q] then
-            local score = EbonBuilds.Scoring.ScorePerQuality(entry, weight, settings, q)
-            parts[#parts + 1] = string.format("|cff%s%d|r", QUALITY_COLORS[q], score)
+            local spellId = entry.spellIds and entry.spellIds[q]
+            if spellId and EbonBuilds.Scoring.IsBanned(spellId) then
+                parts[#parts + 1] = string.format("|cff%sBanned|r", QUALITY_COLORS[q])
+            else
+                local score = EbonBuilds.Scoring.ScorePerQuality(entry, weight, settings, q)
+                parts[#parts + 1] = string.format("|cff%s%d|r", QUALITY_COLORS[q], score)
+            end
         end
     end
     row.scoreLabel:SetText(table.concat(parts, " - "))
@@ -130,7 +158,7 @@ local function ApplyWeight(editBox, raw)
     editBox:SetText(tostring(EbonBuilds.Weights.Get(editBox.echoName)))
     if editBox._row and editBox._row.scoreLabel then
         local row = editBox._row
-        local entry = { name = editBox.echoName, qualities = row._qualities, families = row._families }
+        local entry = { name = editBox.echoName, qualities = row._qualities, families = row._families, spellIds = row._spellIds }
         UpdateScores(row, entry)
     end
 end
@@ -228,6 +256,7 @@ function EbonBuilds.EchoTableRows.Populate(row, yOffset, entry)
     row.weightBox:SetText(tostring(EbonBuilds.Weights.Get(entry.name)))
     row._qualities = entry.qualities
     row._families  = entry.families
+    row._spellIds  = entry.spellIds
     UpdateScores(row, entry)
     row:Show()
 end

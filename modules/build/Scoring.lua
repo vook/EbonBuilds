@@ -94,6 +94,13 @@ function EbonBuilds.Scoring.ComputePeak(classToken, settings)
     return bestName, bestScore or 0
 end
 
+function EbonBuilds.Scoring.IsBanned(spellId)
+    if not spellId then return false end
+    local settings = EbonBuilds.Scoring.GetEffectiveSettings()
+    local banList = settings and settings.echoBanList
+    return banList and banList[spellId] and true or false
+end
+
 function EbonBuilds.Scoring.GetEffectiveSettings()
     if EbonBuilds.BuildForm and EbonBuilds.BuildForm.GetEditingSettings then
         local s = EbonBuilds.BuildForm.GetEditingSettings()

@@ -37,7 +37,13 @@ local whitelistToggles = {}
 local whitelistWarningLabel
 local noveltyBox, noveltyModeToggle
 
-local CONTENT_HEIGHT = 620
+-- Echo ban state
+local echoBanItems = {}
+local echoBanFrame
+local echoBanScroll, echoBanScrollChild, echoBanScrollBar
+local echoBanAllButton
+
+local CONTENT_HEIGHT = 800
 
 local function CreateModeToggle(parent, x, y)
     local btn = CreateFrame("Button", nil, parent)
@@ -369,6 +375,209 @@ local function BuildBanishWhitelistSection(parent, x, y)
 end
 
 ------------------------------------------------------------------------
+-- Echo Ban section
+------------------------------------------------------------------------
+
+local QUALITY_BORDER_COLORS = {
+    [0] = { 1.0, 1.0, 1.0 },
+    [1] = { 30/255, 1.0, 0.0 },
+    [2] = { 0.0, 112/255, 221/255 },
+    [3] = { 163/255, 53/255, 238/255 },
+    [4] = { 1.0, 128/255, 0.0 },
+}
+
+local ICON_SIZE  = 28
+local ICON_GAP   = 4
+local ICON_STEP  = ICON_SIZE + ICON_GAP
+local BAN_LIST_W = 380
+
+local function RefreshBanList()
+    if not echoBanFrame then return end
+    for _, item in ipairs(echoBanItems) do
+        item:Hide()
+    end
+
+    local settings = EbonBuilds.BuildForm.GetEditingSettings()
+    local banList = settings.echoBanList or {}
+    local cols = math.floor(BAN_LIST_W / ICON_STEP)
+    local idx = 0
+
+    for spellId, echoName in pairs(banList) do
+        local quality = 0
+        local data = ProjectEbonhold.PerkDatabase[spellId]
+        if data then quality = data.quality or 0 end
+        local borderColor = QUALITY_BORDER_COLORS[quality] or QUALITY_BORDER_COLORS[0]
+
+        idx = idx + 1
+        if not echoBanItems[idx] then
+            local btn = CreateFrame("Button", nil, echoBanScrollChild)
+            btn:SetSize(ICON_SIZE, ICON_SIZE)
+
+            local icon = btn:CreateTexture(nil, "ARTWORK")
+            icon:SetPoint("TOPLEFT",     btn, "TOPLEFT",     2, -2)
+            icon:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2,  2)
+            btn._icon = icon
+
+            local border = btn:CreateTexture(nil, "OVERLAY")
+            border:SetAllPoints(btn)
+            border:SetTexture("Interface\\Buttons\\CheckButtonHilight")
+            border:SetBlendMode("ADD")
+            btn._border = border
+
+            btn:RegisterForClicks("LeftButtonUp")
+            btn:SetScript("OnEnter", function(self)
+                if not self.spellId then return end
+                local spellName = GetSpellInfo(self.spellId)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:ClearLines()
+                if spellName then
+                    local q = self._quality or 0
+                    local c = QUALITY_LABELS[q] and QUALITY_LABELS[q].color or "ffffff"
+                    GameTooltip:AddLine(string.format("|cff%s%s|r", c, spellName), 1, 1, 1)
+                end
+                if utils and utils.GetSpellDescription then
+                    local desc = utils.GetSpellDescription(self.spellId, 500, 1)
+                    if desc and desc ~= "" then
+                        GameTooltip:AddLine(desc, 1, 1, 1, true)
+                    end
+                end
+                GameTooltip:Show()
+            end)
+            btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            btn:SetScript("OnClick", function(self)
+                local s = EbonBuilds.BuildForm.GetEditingSettings()
+                local id = self._spellId
+                if id then s.echoBanList[id] = nil end
+                RefreshBanList()
+            end)
+            echoBanItems[idx] = btn
+        end
+
+        local btn = echoBanItems[idx]
+        btn._icon:SetTexture(select(3, GetSpellInfo(spellId)))
+        btn.spellId = spellId
+        btn._spellId = spellId
+        btn._quality = quality
+        btn._border:SetVertexColor(borderColor[1], borderColor[2], borderColor[3])
+        btn._border:Show()
+        local col = (idx - 1) % cols
+        local row = math.floor((idx - 1) / cols)
+        btn:SetPoint("TOPLEFT", echoBanScrollChild, "TOPLEFT", col * ICON_STEP, -row * ICON_STEP)
+        btn:Show()
+    end
+
+    local rows = math.ceil(idx / math.max(cols, 1))
+    local contentHeight = math.max(rows * ICON_STEP, echoBanFrame:GetHeight())
+    echoBanScrollChild:SetHeight(contentHeight)
+    local range = math.max(0, contentHeight - echoBanFrame:GetHeight())
+    echoBanScrollBar:SetMinMaxValues(0, range)
+
+    if idx == 0 then
+        echoBanFrame._emptyLabel:Show()
+    else
+        echoBanFrame._emptyLabel:Hide()
+    end
+end
+
+local function AddEchoToBan(name, spellId)
+    local settings = EbonBuilds.BuildForm.GetEditingSettings()
+    settings.echoBanList = settings.echoBanList or {}
+    settings.echoBanList[spellId] = name
+    RefreshBanList()
+end
+
+local function BuildEchoBanSection(parent, x, y)
+    local header = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    header:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+    header:SetText("Echo Ban:")
+
+    local hint = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    hint:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -2)
+    hint:SetText("Echoes listed here get max banish priority and ignore scores.")
+
+    local addBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    addBtn:SetWidth(90)
+    addBtn:SetHeight(20)
+    addBtn:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y - 24)
+    addBtn:SetText("Add Echo")
+    addBtn:SetScript("OnClick", function()
+        local allList = EbonBuilds.EchoTableRows.BuildAllQualitiesList()
+        local settings = EbonBuilds.BuildForm.GetEditingSettings()
+        local banList = settings.echoBanList or {}
+        local filtered = {}
+        for _, entry in ipairs(allList) do
+            if not banList[entry.spellId] then
+                filtered[#filtered + 1] = entry
+            end
+        end
+        EbonBuilds.EchoPicker.Show(function(spellId, quality, name)
+            AddEchoToBan(name, spellId)
+        end, filtered)
+    end)
+
+    local listFrame = CreateFrame("Frame", nil, parent)
+    listFrame:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y - 50)
+    listFrame:SetWidth(BAN_LIST_W)
+    listFrame:SetHeight(80)
+
+    echoBanScroll = CreateFrame("ScrollFrame", nil, listFrame)
+    echoBanScroll:SetPoint("TOPLEFT",     listFrame, "TOPLEFT",     0, 0)
+    echoBanScroll:SetPoint("BOTTOMRIGHT", listFrame, "BOTTOMRIGHT", -16, 0)
+
+    echoBanScrollChild = CreateFrame("Frame", nil, echoBanScroll)
+    echoBanScrollChild:SetWidth(BAN_LIST_W)
+    echoBanScrollChild:SetHeight(80)
+    echoBanScroll:SetScrollChild(echoBanScrollChild)
+
+    echoBanScrollBar = CreateFrame("Slider", nil, echoBanScroll, "UIPanelScrollBarTemplate")
+    echoBanScrollBar:SetPoint("TOPLEFT",     echoBanScroll, "TOPRIGHT",     -14, -2)
+    echoBanScrollBar:SetPoint("BOTTOMLEFT",  echoBanScroll, "BOTTOMRIGHT",  -14,  2)
+    echoBanScrollBar:SetValueStep(ICON_STEP)
+    echoBanScrollBar:SetValue(0)
+    echoBanScrollBar:SetScript("OnValueChanged", function(self, value)
+        echoBanScrollChild:SetPoint("TOPLEFT", echoBanScroll, "TOPLEFT", 0, value)
+    end)
+
+    echoBanScroll:EnableMouseWheel(true)
+    echoBanScroll:SetScript("OnMouseWheel", function(self, delta)
+        local current  = echoBanScrollBar:GetValue()
+        local min, max = echoBanScrollBar:GetMinMaxValues()
+        echoBanScrollBar:SetValue(math.max(min, math.min(max, current - delta * ICON_STEP)))
+    end)
+
+    local empty = listFrame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    empty:SetPoint("TOPLEFT", listFrame, "TOPLEFT", 10, -4)
+    empty:SetText("No echoes banned.")
+    listFrame._emptyLabel = empty
+
+    echoBanFrame = listFrame
+
+    local allLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    allLabel:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y - 178)
+    allLabel:SetWidth(300)
+    allLabel:SetJustifyH("LEFT")
+    allLabel:SetText("When all offered are banned and no charges left:")
+
+    echoBanAllButton = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    echoBanAllButton:SetWidth(110)
+    echoBanAllButton:SetHeight(20)
+    echoBanAllButton:SetPoint("TOPLEFT", parent, "TOPLEFT", x + 310, y - 173)
+    echoBanAllButton:SetText("Highest Score")
+    echoBanAllButton._value = "highestScore"
+    echoBanAllButton:SetScript("OnClick", function(self)
+        if self._value == "highestScore" then
+            self._value = "random"
+            self:SetText("Random")
+        else
+            self._value = "highestScore"
+            self:SetText("Highest Score")
+        end
+        local s = EbonBuilds.BuildForm.GetEditingSettings()
+        s.echoBanAllMode = self._value
+    end)
+end
+
+------------------------------------------------------------------------
 -- Novelty bonus section
 ------------------------------------------------------------------------
 
@@ -505,6 +714,12 @@ local function RefreshInputs()
         noveltyModeToggle.modeLabel:SetText(noveltyModeToggle.multiplicative and "|cff19ff19x|r" or "+")
     end
     RefreshWhitelistToggles()
+    RefreshBanList()
+    if echoBanAllButton then
+        local mode = settings.echoBanAllMode or "highestScore"
+        echoBanAllButton._value = mode
+        echoBanAllButton:SetText(mode == "random" and "Random" or "Highest Score")
+    end
     RefreshPeak()
 end
 
@@ -569,9 +784,10 @@ local function BuildViewFrame(parent)
     BuildQualityBonusSection    (scrollChild, 10,  -5)
     BuildFamilyBonusSection     (scrollChild, 10, -90)
     BuildBanishWhitelistSection (scrollChild, 10, -215)
-    BuildNoveltyBonusSection    (scrollChild, 10, -310)
-    BuildPeakRow                (scrollChild, 10, -410)
-    BuildThresholdsSection      (scrollChild, 10, -440)
+    BuildEchoBanSection         (scrollChild, 10, -310)
+    BuildNoveltyBonusSection    (scrollChild, 10, -510)
+    BuildPeakRow                (scrollChild, 10, -610)
+    BuildThresholdsSection      (scrollChild, 10, -640)
 
     return f
 end

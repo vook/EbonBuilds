@@ -17,6 +17,8 @@ local function DefaultSettings()
         freezePenaltyPct = 0,
         noveltyValue     = 0,
         noveltyMode      = false,
+        echoBanList      = {},
+        echoBanAllMode   = "highestScore",
     }
 end
 
