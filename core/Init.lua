@@ -21,6 +21,7 @@ local function OnAddonLoaded(addonName)
 
     EbonBuilds.Build.Migrate()
     EbonBuilds.Weights.Init()
+    EbonBuilds.BonusView.Init()
     EbonBuilds.MinimapButton.Init()
     EbonBuilds.MainWindow.Init()
 end

@@ -1,7 +1,8 @@
 -- EbonBuilds: modules/ui/SettingsView.lua
--- Responsibility: render the Automation tab (quality/family bonuses, peak
--- display and auto-behaviour thresholds). Exposes Mount/Unmount. Reads and
--- writes into BuildForm state.settings so unsaved edits persist across tabs.
+-- Responsibility: render the Automation tab (banish protection, echo ban,
+-- novelty bonus, peak display and auto-behaviour thresholds).
+-- Exposes Mount/Unmount. Reads and writes into BuildForm state.settings
+-- so unsaved edits persist across tabs.
 -- Layout-heavy/declarative: template-file exception applies.
 
 EbonBuilds.SettingsView = {}
@@ -27,15 +28,10 @@ local THRESHOLDS = {
 
 local viewFrame
 local scrollFrame, scrollChild, scrollBar
-local qualityBoxes     = {}
-local qualityModeToggles = {}
-local familyBoxes      = {}
-local familyModeToggles = {}
 local thresholdBoxes   = {}
 local peakLabel
 local whitelistToggles = {}
 local whitelistWarningLabel
-local noveltyBox, noveltyModeToggle
 
 -- Echo ban state
 local echoBanItems = {}
@@ -43,7 +39,7 @@ local echoBanFrame
 local echoBanScroll, echoBanScrollChild, echoBanScrollBar
 local echoBanAllButton
 
-local CONTENT_HEIGHT = 800
+local CONTENT_HEIGHT = 520
 
 local function CreateModeToggle(parent, x, y)
     local btn = CreateFrame("Button", nil, parent)
@@ -146,136 +142,6 @@ local function RefreshPeak()
         peakLabel:SetText(string.format("Peak: %s = %d", name, score))
     else
         peakLabel:SetText("Peak: (no echoes)")
-    end
-end
-
-------------------------------------------------------------------------
--- Quality bonus section
-------------------------------------------------------------------------
-
-local function CommitQualityBox(box)
-    local settings = EbonBuilds.BuildForm.GetEditingSettings()
-    local num = tonumber(box:GetText())
-    if num then
-        settings.qualityBonus[box.qIndex] = num
-    end
-    box:SetText(tostring(settings.qualityBonus[box.qIndex] or 0))
-    RefreshPeak()
-end
-
-local function BuildQualityBonusSection(parent, x, y)
-    local header = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    header:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
-    header:SetText("Quality Bonus:")
-
-    local hint = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    hint:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -2)
-    hint:SetText("Use + to add the value, |cff19ff19x|r to multiply. Below 1 in |cff19ff19x|r mode reduces the score.")
-
-    for q = 0, 4 do
-        local cx = x + q * 80
-
-        local lbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        local info = QUALITY_LABELS[q]
-        lbl:SetText("|cff" .. info.color .. info.name .. "|r")
-        lbl:SetPoint("TOPLEFT", parent, "TOPLEFT", cx, y - 38)
-        lbl:SetWidth(70)
-        lbl:SetJustifyH("CENTER")
-
-        local box = CreateNumberEditBox(parent, 38, 22, true, true)
-        box:GetParent():SetPoint("TOPLEFT", parent, "TOPLEFT", cx + 5, y - 54)
-        box.qIndex = q
-        box:SetScript("OnEnterPressed",    function(self) CommitQualityBox(self); self:ClearFocus() end)
-        box:SetScript("OnEditFocusLost",   function(self) CommitQualityBox(self) end)
-        box:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
-        qualityBoxes[q] = box
-
-        local toggle = CreateModeToggle(parent, cx + 45, y - 54)
-        toggle.onToggle = function()
-            local s = EbonBuilds.BuildForm.GetEditingSettings()
-            s.qualityBonusMode[q] = toggle.multiplicative
-            RefreshPeak()
-        end
-        qualityModeToggles[q] = toggle
-    end
-end
-
-------------------------------------------------------------------------
--- Family bonus section
-------------------------------------------------------------------------
-
-local FAMILY_ROW1 = { "Tank", "Survivability", "Healer", "Caster" }
-local FAMILY_ROW2 = { "Melee", "Ranged", "No family" }
-
-local function CommitFamilyBox(box)
-    local settings = EbonBuilds.BuildForm.GetEditingSettings()
-    local num = tonumber(box:GetText())
-    if num then
-        settings.familyBonus[box.famKey] = num
-    end
-    box:SetText(tostring(settings.familyBonus[box.famKey] or 0))
-    RefreshPeak()
-end
-
-local function BuildFamilyBonusSection(parent, x, y)
-    local header = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    header:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
-    header:SetText("Family Bonus:")
-
-    local hint = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    hint:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -2)
-    hint:SetText("Use + to add the value, |cff19ff19x|r to multiply. Below 1 in |cff19ff19x|r mode reduces the score.")
-
-    for i, fam in ipairs(FAMILY_ROW1) do
-        local cx = x + (i - 1) * 100
-
-        local lbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        lbl:SetText(fam)
-        lbl:SetPoint("TOPLEFT", parent, "TOPLEFT", cx, y - 38)
-        lbl:SetWidth(55)
-        lbl:SetJustifyH("CENTER")
-
-        local box = CreateNumberEditBox(parent, 38, 22, true, true)
-        box:GetParent():SetPoint("TOPLEFT", parent, "TOPLEFT", cx + 5, y - 54)
-        box.famKey = fam
-        box:SetScript("OnEnterPressed",    function(self) CommitFamilyBox(self); self:ClearFocus() end)
-        box:SetScript("OnEditFocusLost",   function(self) CommitFamilyBox(self) end)
-        box:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
-        familyBoxes[fam] = box
-
-        local toggle = CreateModeToggle(parent, cx + 45, y - 54)
-        toggle.onToggle = function()
-            local s = EbonBuilds.BuildForm.GetEditingSettings()
-            s.familyBonusMode[fam] = toggle.multiplicative
-            RefreshPeak()
-        end
-        familyModeToggles[fam] = toggle
-    end
-
-    for i, fam in ipairs(FAMILY_ROW2) do
-        local cx = x + (i - 1) * 100
-
-        local lbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        lbl:SetText(fam)
-        lbl:SetPoint("TOPLEFT", parent, "TOPLEFT", cx, y - 84)
-        lbl:SetWidth(55)
-        lbl:SetJustifyH("CENTER")
-
-        local box = CreateNumberEditBox(parent, 38, 22, true, true)
-        box:GetParent():SetPoint("TOPLEFT", parent, "TOPLEFT", cx + 5, y - 100)
-        box.famKey = fam
-        box:SetScript("OnEnterPressed",    function(self) CommitFamilyBox(self); self:ClearFocus() end)
-        box:SetScript("OnEditFocusLost",   function(self) CommitFamilyBox(self) end)
-        box:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
-        familyBoxes[fam] = box
-
-        local toggle = CreateModeToggle(parent, cx + 45, y - 100)
-        toggle.onToggle = function()
-            local s = EbonBuilds.BuildForm.GetEditingSettings()
-            s.familyBonusMode[fam] = toggle.multiplicative
-            RefreshPeak()
-        end
-        familyModeToggles[fam] = toggle
     end
 end
 
@@ -578,47 +444,6 @@ local function BuildEchoBanSection(parent, x, y)
 end
 
 ------------------------------------------------------------------------
--- Novelty bonus section
-------------------------------------------------------------------------
-
-local function CommitNoveltyBox()
-    local settings = EbonBuilds.BuildForm.GetEditingSettings()
-    local num = tonumber(noveltyBox:GetText())
-    if num then
-        settings.noveltyValue = num
-    end
-    noveltyBox:SetText(tostring(settings.noveltyValue or 0))
-    RefreshPeak()
-end
-
-local function BuildNoveltyBonusSection(parent, x, y)
-    local header = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    header:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
-    header:SetText("Novelty Bonus:")
-
-    local hint = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    hint:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -2)
-    hint:SetText("Unique echoes (seen for the first time) gain this bonus.")
-
-    local valLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    valLabel:SetText("Value:")
-    valLabel:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y - 32)
-
-    noveltyBox = CreateNumberEditBox(parent, 50, 22, true, true)
-    noveltyBox:GetParent():SetPoint("TOPLEFT", parent, "TOPLEFT", x + 40, y - 34)
-    noveltyBox:SetScript("OnEnterPressed",    function(self) CommitNoveltyBox(); self:ClearFocus() end)
-    noveltyBox:SetScript("OnEditFocusLost",   function(self) CommitNoveltyBox() end)
-    noveltyBox:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
-
-    noveltyModeToggle = CreateModeToggle(parent, x + 95, y - 32)
-    noveltyModeToggle.onToggle = function()
-        local s = EbonBuilds.BuildForm.GetEditingSettings()
-        s.noveltyMode = noveltyModeToggle.multiplicative
-        RefreshPeak()
-    end
-end
-
-------------------------------------------------------------------------
 -- Peak row
 ------------------------------------------------------------------------
 
@@ -656,7 +481,7 @@ local function BuildThresholdsSection(parent, x, y)
         local col  = (i - 1) % 2
         local row  = math.floor((i - 1) / 2)
         local cx   = x + col * 260
-        local cy   = y - 38 - row * 50
+        local cy   = y - 38 - row * 56
 
         local lbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         lbl:SetText(entry.label)
@@ -672,7 +497,7 @@ local function BuildThresholdsSection(parent, x, y)
         box:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
 
         local hint = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        hint:SetPoint("TOPLEFT",  parent, "TOPLEFT", cx, cy - 22)
+        hint:SetPoint("TOPLEFT",  parent, "TOPLEFT", cx, cy - 30)
         hint:SetWidth(240)
         hint:SetJustifyH("LEFT")
         hint:SetText(entry.hint)
@@ -687,31 +512,8 @@ end
 
 local function RefreshInputs()
     local settings = EbonBuilds.BuildForm.GetEditingSettings()
-    for q = 0, 4 do
-        qualityBoxes[q]:SetText(tostring(settings.qualityBonus[q] or 0))
-        local toggle = qualityModeToggles[q]
-        if toggle then
-            toggle.multiplicative = settings.qualityBonusMode[q] or false
-            toggle.modeLabel:SetText(toggle.multiplicative and "|cff19ff19x|r" or "+")
-        end
-    end
-    for _, fam in ipairs(FAMILY_ORDER) do
-        familyBoxes[fam]:SetText(tostring(settings.familyBonus[fam] or 0))
-        local toggle = familyModeToggles[fam]
-        if toggle then
-            toggle.multiplicative = settings.familyBonusMode[fam] or false
-            toggle.modeLabel:SetText(toggle.multiplicative and "|cff19ff19x|r" or "+")
-        end
-    end
     for _, entry in ipairs(THRESHOLDS) do
         thresholdBoxes[entry.key]:SetText(tostring(settings[entry.key] or 0))
-    end
-    if noveltyBox then
-        noveltyBox:SetText(tostring(settings.noveltyValue or 0))
-    end
-    if noveltyModeToggle then
-        noveltyModeToggle.multiplicative = settings.noveltyMode or false
-        noveltyModeToggle.modeLabel:SetText(noveltyModeToggle.multiplicative and "|cff19ff19x|r" or "+")
     end
     RefreshWhitelistToggles()
     RefreshBanList()
@@ -724,10 +526,7 @@ local function RefreshInputs()
 end
 
 local function CommitFocusedBoxes()
-    for _, box in pairs(qualityBoxes)   do if box:HasFocus() then CommitQualityBox(box)   end end
-    for _, box in pairs(familyBoxes)    do if box:HasFocus() then CommitFamilyBox(box)    end end
     for _, box in pairs(thresholdBoxes) do if box:HasFocus() then CommitThresholdBox(box) end end
-    if noveltyBox and noveltyBox:HasFocus() then CommitNoveltyBox() end
 end
 
 ------------------------------------------------------------------------
@@ -781,13 +580,10 @@ local function BuildViewFrame(parent)
 
     scrollFrame:SetScript("OnSizeChanged", UpdateScrollRange)
 
-    BuildQualityBonusSection    (scrollChild, 10,  -5)
-    BuildFamilyBonusSection     (scrollChild, 10, -90)
-    BuildBanishWhitelistSection (scrollChild, 10, -215)
-    BuildEchoBanSection         (scrollChild, 10, -310)
-    BuildNoveltyBonusSection    (scrollChild, 10, -510)
-    BuildPeakRow                (scrollChild, 10, -610)
-    BuildThresholdsSection      (scrollChild, 10, -640)
+    BuildBanishWhitelistSection (scrollChild, 10,  -5)
+    BuildEchoBanSection         (scrollChild, 10, -100)
+    BuildPeakRow                (scrollChild, 10, -295)
+    BuildThresholdsSection      (scrollChild, 10, -325)
 
     return f
 end
