@@ -14,9 +14,42 @@ local FAMILY_MAP = {
     None   = "No family",
 }
 
+local EVAL_DELAY = 2  -- seconds before evaluating (TODO: make configurable)
+
+local evalTimerFrame   = nil
+local evalTimerElapsed = 0
+local evalTimerActive  = false
+local pendingChoices   = nil
+local origPerkUIShow   = nil
+
 ------------------------------------------------------------------------
 -- Internal helpers
 ------------------------------------------------------------------------
+
+local function StartEvalTimer()
+    if not evalTimerFrame then
+        evalTimerFrame = CreateFrame("Frame")
+        evalTimerFrame:SetScript("OnUpdate", function(self, dt)
+            evalTimerElapsed = evalTimerElapsed + dt
+            if evalTimerElapsed >= EVAL_DELAY then
+                evalTimerActive = false
+                evalTimerFrame:Hide()
+                if EbonBuilds.Automation.Evaluate() then
+                    pendingChoices = nil
+                    return
+                end
+                -- Automation couldn't act, show the native perk UI
+                if pendingChoices and origPerkUIShow then
+                    origPerkUIShow(pendingChoices)
+                end
+                pendingChoices = nil
+            end
+        end)
+    end
+    evalTimerElapsed = 0
+    evalTimerActive = true
+    evalTimerFrame:Show()
+end
 
 local function GetRunData()
     if EbonholdPlayerRunData and EbonholdPlayerRunData.remainingBanishes ~= nil then
@@ -108,7 +141,7 @@ local function TrySelect(scored, settings, build)
         end
     end
     local candidates = #nonBanned > 0 and nonBanned or all
-    if #candidates == 0 then return false end
+    if #candidates == 0 then return false, nil end
 
     table.sort(candidates, function(a, b) return a.score > b.score end)
 
@@ -121,7 +154,21 @@ local function TrySelect(scored, settings, build)
 
     ProjectEbonhold.PerkService.SelectPerk(pick.spellId)
     UpdateStat(build, "picks")
-    return true
+    return true, pick
+end
+
+local function AnnotateScored(scored, banList, whitelist, lockedList)
+    for _, s in ipairs(scored) do
+        s.isBanned    = banList[s.spellId] and true or false
+        s.isProtected = IsProtected(s.data, whitelist)
+        s.isLocked    = false
+        for _, lockedId in ipairs(lockedList) do
+            if lockedId and lockedId == s.spellId then
+                s.isLocked = true
+                break
+            end
+        end
+    end
 end
 
 ------------------------------------------------------------------------
@@ -153,19 +200,21 @@ function EbonBuilds.Automation.Evaluate()
     end
     if #scored == 0 then return false end
 
+    local banList    = settings.echoBanList or {}
+    local whitelist  = settings.banishFamilyWhitelist or {}
+    AnnotateScored(scored, banList, whitelist, lockedList)
+
     -- PRE-CHECK: if any offered echo matches a locked echo slot, select it
     for _, s in ipairs(scored) do
         for _, lockedId in ipairs(lockedList) do
             if lockedId and lockedId == s.spellId then
                 ProjectEbonhold.PerkService.SelectPerk(s.spellId)
                 UpdateStat(build, "picks")
+                EbonBuilds.Toast.ShowAutomationResult(scored, "Select (Locked)", s.index)
                 return true
             end
         end
     end
-
-    local banList    = settings.echoBanList or {}
-    local whitelist  = settings.banishFamilyWhitelist or {}
 
     --------------------------------------------------------------------
     -- 1. TRY BANISH (highest action priority)
@@ -176,9 +225,13 @@ function EbonBuilds.Automation.Evaluate()
         -- Ban-list echoes first (these have minimum priority)
         for _, s in ipairs(scored) do
             if not s.isFrozen and not s.isCarried and banList[s.spellId] then
-                if not IsProtected(s.data, whitelist) then
+                if not s.isProtected then
                     local ok = ProjectEbonhold.PerkService.BanishPerk(s.index - 1)
-                    if ok then UpdateStat(build, "banishesUsed"); return true end
+                    if ok then
+                        UpdateStat(build, "banishesUsed")
+                        EbonBuilds.Toast.ShowAutomationResult(scored, "Banish", s.index)
+                        return true
+                    end
                 end
             end
         end
@@ -187,9 +240,13 @@ function EbonBuilds.Automation.Evaluate()
         local threshold = math.floor(peakScore * settings.autoBanishPct / 100)
         for _, s in ipairs(scored) do
             if not s.isFrozen and not s.isCarried and s.score < threshold then
-                if not IsProtected(s.data, whitelist) then
+                if not s.isProtected then
                     local ok = ProjectEbonhold.PerkService.BanishPerk(s.index - 1)
-                    if ok then UpdateStat(build, "banishesUsed"); return true end
+                    if ok then
+                        UpdateStat(build, "banishesUsed")
+                        EbonBuilds.Toast.ShowAutomationResult(scored, "Banish", s.index)
+                        return true
+                    end
                 end
             end
         end
@@ -203,7 +260,11 @@ function EbonBuilds.Automation.Evaluate()
         for _, s in ipairs(scored) do sum = sum + s.score end
         if sum < peakScore * settings.autoRerollPct / 100 then
             local ok = ProjectEbonhold.PerkService.RequestReroll()
-            if ok then UpdateStat(build, "rerollsUsed"); return true end
+            if ok then
+                UpdateStat(build, "rerollsUsed")
+                EbonBuilds.Toast.ShowAutomationResult(scored, "Reroll", 0)
+                return true
+            end
         end
     end
 
@@ -236,8 +297,12 @@ function EbonBuilds.Automation.Evaluate()
             local ok = ProjectEbonhold.PerkService.FreezePerk(target.index - 1)
             if ok then
                 UpdateStat(build, "freezesUsed")
+                EbonBuilds.Toast.ShowAutomationResult(scored, "Freeze", target.index)
                 -- Freeze is not terminal; proceed to select the best remaining
-                TrySelect(scored, settings, build)
+                local _, pick = TrySelect(scored, settings, build)
+                if pick then
+                    EbonBuilds.Toast.ShowAutomationResult(scored, "Select", pick.index)
+                end
                 return true
             end
         end
@@ -246,7 +311,11 @@ function EbonBuilds.Automation.Evaluate()
     --------------------------------------------------------------------
     -- 4. SELECT (fallback)
     --------------------------------------------------------------------
-    return TrySelect(scored, settings, build)
+    local ok, pick = TrySelect(scored, settings, build)
+    if ok and pick then
+        EbonBuilds.Toast.ShowAutomationResult(scored, "Select", pick.index)
+    end
+    return ok
 end
 
 ------------------------------------------------------------------------
@@ -259,21 +328,21 @@ function EbonBuilds.Automation.Init()
 
     local PerkUI = ProjectEbonhold.PerkUI
 
-    -- Pre-hook Show: evaluate automation before the native UI appears.
-    -- If automation handles the round, suppress the UI entirely.
-    local origShow = PerkUI.Show
+    -- Pre-hook Show: suppress the native UI and start a delayed evaluation.
+    -- A timer gives the game time to fully set up the choice data before
+    -- automation tries to act on it, preventing race conditions that cause
+    -- the perk window to disappear without any action being taken.
+    origPerkUIShow = PerkUI.Show
     PerkUI.Show = function(choices)
-        if EbonBuilds.Automation.Evaluate() then
-            return
-        end
-        return origShow(choices)
+        pendingChoices = choices
+        StartEvalTimer()
     end
 
     -- Post-hook UpdateSinglePerk: called after a banish replacement animates
-    -- the card. Re-evaluate so automation can chain actions (e.g. banish the
-    -- replacement if it is also below threshold).
+    -- the card. Start a fresh timer so automation can chain actions (e.g.
+    -- banish the replacement if it is also below threshold).
     hooksecurefunc(PerkUI, "UpdateSinglePerk", function()
-        EbonBuilds.Automation.Evaluate()
+        StartEvalTimer()
     end)
 
     PerkUI._ebonBuildsHooked = true
