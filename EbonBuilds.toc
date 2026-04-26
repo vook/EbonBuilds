@@ -22,3 +22,4 @@ modules/ui/WelcomeView.lua
 modules/ui/BonusView.lua
 modules/ui/SettingsView.lua
 modules/ui/BuildTabs.lua
+modules/ui/BuildOverview.lua

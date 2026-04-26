@@ -136,7 +136,7 @@ end
 local function WireNavigate(btn, build)
     btn:SetScript("OnClick", function()
         EbonBuilds.Build.SetActive(build.id)
-        EbonBuilds.ViewRouter.Show("buildTabs", { mode = "edit", build = build })
+        EbonBuilds.ViewRouter.Show("buildOverview", { build = build })
     end)
 end
 

@@ -89,6 +89,7 @@ function EbonBuilds.MainWindow.Init()
     EbonBuilds.BuildForm.Init()
     EbonBuilds.SettingsView.Init()
     EbonBuilds.BuildTabs.Init()
+    EbonBuilds.BuildOverview.Init()
 
     EbonBuilds.ViewRouter.Register("welcome", {
         Show = function(container, _)
@@ -105,7 +106,7 @@ end
 function EbonBuilds.MainWindow._ShowInitialView()
     local active = EbonBuilds.Build.GetActive()
     if active then
-        EbonBuilds.ViewRouter.Show("buildTabs", { mode = "edit", build = active })
+        EbonBuilds.ViewRouter.Show("buildOverview", { build = active })
     elseif #EbonBuilds.Build.List() > 0 then
         EbonBuilds.ViewRouter.Show("buildTabs", { mode = "create" })
     else

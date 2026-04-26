@@ -42,6 +42,27 @@ end
 
 EbonBuilds.Build.EnsureSettings = EnsureSettings
 
+local function EnsureStats(build)
+    build.stats = build.stats or {
+        echoesSeen    = 0,
+        runsCompleted = 0,
+        runsReset     = 0,
+        picks         = 0,
+        rerollsUsed   = 0,
+        banishesUsed  = 0,
+        freezesUsed   = 0,
+        qualityPicks  = { 0, 0, 0, 0, 0 },
+        mostPicked    = {},
+        mostBanned    = {},
+    }
+    build.stats.qualityPicks = build.stats.qualityPicks or { 0, 0, 0, 0, 0 }
+    build.stats.mostPicked   = build.stats.mostPicked   or {}
+    build.stats.mostBanned   = build.stats.mostBanned   or {}
+    if build.automationEnabled == nil then build.automationEnabled = true end
+    if not build.author then build.author = "Unknown" end
+    if not build.lastModified then build.lastModified = date() end
+end
+
 local activeChangeCallbacks = {}
 
 local function Notify()
@@ -112,7 +133,7 @@ function EbonBuilds.Build.Migrate()
     end
     EbonBuildsDB.echoWeights = nil
 
-    for _, b in pairs(EbonBuildsDB.builds) do EnsureSettings(b) end
+    for _, b in pairs(EbonBuildsDB.builds) do EnsureSettings(b); EnsureStats(b) end
 end
 
 ------------------------------------------------------------------------
@@ -165,6 +186,21 @@ function EbonBuilds.Build.Create(data)
         echoWeights     = EbonBuildsDB.pendingWeights or {},
         settings        = data.settings or DefaultSettings(),
         version         = 1,
+        author          = UnitName("player") or "Unknown",
+        lastModified    = date(),
+        automationEnabled = true,
+        stats           = {
+            echoesSeen    = 0,
+            runsCompleted = 0,
+            runsReset     = 0,
+            picks         = 0,
+            rerollsUsed   = 0,
+            banishesUsed  = 0,
+            freezesUsed   = 0,
+            qualityPicks  = { 0, 0, 0, 0, 0 },
+            mostPicked    = {},
+            mostBanned    = {},
+        },
     }
     EbonBuildsDB.pendingWeights = nil
     EbonBuildsDB.builds[id] = build
@@ -181,7 +217,9 @@ function EbonBuilds.Build.Save(id, data)
     build.comments        = data.comments        or build.comments
     build.permanentEchoes = data.permanentEchoes or build.permanentEchoes
     if data.settings then build.settings = data.settings end
+    if data.automationEnabled ~= nil then build.automationEnabled = data.automationEnabled end
     build.version         = (build.version or 1) + 1
+    build.lastModified    = date()
     if classChanged and EbonBuildsDB.activeBuildId == id then
         Notify()
     end
