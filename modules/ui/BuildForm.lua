@@ -399,9 +399,9 @@ end
 local function OnCancel()
     local active = EbonBuilds.Build.GetActive()
     if active then
-        EbonBuilds.ViewRouter.Show("buildTabs", { mode = "edit", build = active })
+        EbonBuilds.ViewRouter.Show("buildOverview", { build = active })
     else
-        EbonBuilds.MainWindow._frame:Hide()
+        EbonBuilds.ViewRouter.Show("welcome")
     end
 end
 

@@ -36,6 +36,36 @@ local contentArea
 local state = { build = nil }
 
 ------------------------------------------------------------------------
+-- Delete confirmation dialog
+------------------------------------------------------------------------
+
+StaticPopupDialogs["EBONBUILDS_DELETE_BUILD"] = {
+    text = "",
+    button1 = "Delete",
+    button2 = "Cancel",
+    OnAccept = function()
+        local build = state.build
+        if not build or not build.id then return end
+        local id = build.id
+        EbonBuilds.Build.Delete(id)
+        if EbonBuilds.BuildList and EbonBuilds.BuildList.Refresh then
+            EbonBuilds.BuildList.Refresh()
+        end
+        local builds = EbonBuilds.Build.List()
+        if #builds > 0 then
+            EbonBuilds.Build.SetActive(builds[1].id)
+            EbonBuilds.ViewRouter.Show("buildOverview", { build = builds[1] })
+        else
+            EbonBuilds.ViewRouter.Show("welcome")
+        end
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+}
+
+------------------------------------------------------------------------
 -- Helpers
 ------------------------------------------------------------------------
 
@@ -61,6 +91,162 @@ end
 ------------------------------------------------------------------------
 -- Overview tab
 ------------------------------------------------------------------------
+
+------------------------------------------------------------------------
+-- Missing Echoes computation
+------------------------------------------------------------------------
+
+local CLASS_MASK = {
+    WARRIOR = 1, PALADIN = 2, HUNTER = 4, ROGUE = 8,
+    PRIEST = 16, DEATHKNIGHT = 32, SHAMAN = 64, MAGE = 128,
+    WARLOCK = 256, DRUID = 1024,
+}
+
+-- Strip common prefixes/suffixes so spell-name comparison is robust against
+-- cosmetic variants like "Tome of Brittle Forging" vs "Brittle Forging".
+local PREFIXES = { "tome of ", "codex of ", "scroll of ", "manual of ", "grimoire of ", "libram of ", "tablet of " }
+local QUALITY_SUFFIXES = { " %- common", " %- uncommon", " %- rare", " %- epic", " %- legendary" }
+
+local function NormalizeEchoName(name)
+    if not name then return nil end
+    local n = strlower(name)
+    for _, prefix in ipairs(PREFIXES) do
+        if n:sub(1, #prefix) == prefix then
+            n = n:sub(#prefix + 1)
+            break
+        end
+    end
+    for _, suffix in ipairs(QUALITY_SUFFIXES) do
+        if n:sub(-#suffix) == suffix then
+            n = n:sub(1, -(#suffix + 1))
+            break
+        end
+    end
+    return n
+end
+
+local function ComputeMissingEchoes(build)
+    if not build or not build.class then return nil end
+
+    local classMask = CLASS_MASK[build.class] or 0
+    local playerLevel = UnitLevel("player")
+
+    -- Read the spellbook's "Echoes" tab to find permanently-learned echo spells.
+    -- Spellbook spellIds are in the 300xxx range (Tome spells). The actual echo
+    -- data lives in PerkDatabase under 200xxx spellIds. We resolve via
+    -- PerkDatabase[spellId].requiredSpell matching the spellbook spellId,
+    -- or by subtracting 100000 as fallback.
+    local ownedLower = {}
+    local ownedGroups = {}
+    local spellbookIds = {}
+    local numTabs = GetNumSpellTabs and GetNumSpellTabs() or 0
+    for tabIdx = 1, numTabs do
+        local tabName, _, offset, numSpells = GetSpellTabInfo(tabIdx)
+        if tabName == "Echoes" then
+            for slot = offset + 1, offset + numSpells do
+                local link = GetSpellLink(slot, "spell")
+                local tomeSpellId = link and tonumber(link:match("spell:(%d+)"))
+                if tomeSpellId then
+                    spellbookIds[tomeSpellId] = true
+                end
+            end
+            break
+        end
+    end
+
+    -- Resolve each spellbook spell to its PerkDatabase echo entry,
+    -- then build owned sets from the echo's name + groupId.
+    for spellId, data in pairs(ProjectEbonhold.PerkDatabase) do
+        local isOwned = spellbookIds[data.requiredSpell] or spellbookIds[spellId + 100000]
+        if isOwned then
+            local name = GetSpellInfo(spellId)
+            local norm = NormalizeEchoName(name)
+            if norm then ownedLower[norm] = true end
+            if data.groupId then ownedGroups[data.groupId] = true end
+        end
+    end
+
+    -- Build permanent echo name set for priority sorting
+    local permLower = {}
+    if build.permanentEchoes then
+        for _, spellId in ipairs(build.permanentEchoes) do
+            if spellId then
+                local name = GetSpellInfo(spellId)
+                if name then permLower[NormalizeEchoName(name)] = true end
+            end
+        end
+    end
+
+    -- Group by spell name, keep highest quality per name
+    local byName = {}
+    for spellId, data in pairs(ProjectEbonhold.PerkDatabase) do
+        local spellName = GetSpellInfo(spellId)
+        if spellName then
+            local key = NormalizeEchoName(spellName)
+            local isOwned = ownedLower[key] or (data.groupId and ownedGroups[data.groupId])
+            if not isOwned then
+                if classMask == 0 or bit.band(data.classMask or 0, classMask) ~= 0 then
+                    if not data.minLevel or playerLevel >= data.minLevel then
+                        local existing = byName[key]
+                        if not existing or (data.quality or 0) > (existing.quality or 0) then
+                            byName[key] = { spellId = spellId, data = data, displayName = spellName }
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- Collect missing echoes (only those with known drop source, exclude banned)
+    local settings = build.settings or EbonBuilds.Build.DefaultSettings()
+    local banList = settings.echoBanList or {}
+    local weights = build.echoWeights or {}
+    local missing = {}
+    for key, entry in pairs(byName) do
+        local source = ProjectEbonhold.PerkDropSources and ProjectEbonhold.PerkDropSources[entry.spellId]
+        if not source and entry.data.groupId and ProjectEbonhold.PerkDropSourceByGroup then
+            source = ProjectEbonhold.PerkDropSourceByGroup[entry.data.groupId]
+        end
+        if source and not banList[entry.spellId] then
+            -- Build scoring entry
+            local scoringEntry = {
+                spellId = entry.spellId,
+                name = entry.displayName,
+                quality = entry.data.quality or 0,
+                families = entry.data.families,
+                classMask = entry.data.classMask,
+            }
+            local weight = weights[entry.displayName] or 0
+            local score = EbonBuilds.Scoring.Score(scoringEntry, weight, settings)
+            missing[#missing + 1] = {
+                spellId = entry.spellId,
+                name = entry.displayName,
+                quality = entry.data.quality or 0,
+                dropSource = source,
+                isPermanent = permLower[key] or false,
+                score = score,
+            }
+        end
+    end
+
+    -- Sort: permanent echoes first, then score desc, then quality desc, then name asc
+    table.sort(missing, function(a, b)
+        if a.isPermanent ~= b.isPermanent then
+            return a.isPermanent
+        end
+        if a.score ~= b.score then
+            return a.score > b.score
+        end
+        if a.quality ~= b.quality then
+            return a.quality > b.quality
+        end
+        return a.name < b.name
+    end)
+    return missing
+end
+
+------------------------------------------------------------------------
+-- Overview tab content
 
 local function BuildOverviewTab(parent)
     local outer = CreateFrame("Frame", nil, parent)
@@ -148,7 +334,7 @@ local function BuildOverviewTab(parent)
     -- Description with its own scroll frame
     local descScroll = CreateFrame("ScrollFrame", nil, outer)
     descScroll:SetPoint("TOPLEFT",     descHeader, "BOTTOMLEFT", 0, -4)
-    descScroll:SetPoint("BOTTOMRIGHT", outer,      "BOTTOMRIGHT", -22, 8)
+    descScroll:SetPoint("BOTTOMRIGHT", outer,      "BOTTOMRIGHT", -22, 28)
 
     local descChild = CreateFrame("Frame", nil, descScroll)
     descChild:SetWidth(420)
@@ -181,6 +367,20 @@ local function BuildOverviewTab(parent)
     outer._descChild  = descChild
     outer._descBar    = descBar
 
+    -- Delete button (bottom-left, below description, low misclick probability)
+    local deleteBtn = CreateFrame("Button", nil, outer, "UIPanelButtonTemplate")
+    deleteBtn:SetSize(64, 20)
+    deleteBtn:SetPoint("BOTTOMLEFT", outer, "BOTTOMLEFT", 10, 4)
+    deleteBtn:SetText("Delete")
+    deleteBtn:SetScript("OnClick", function()
+        local build = state.build
+        if not build then return end
+        local name = build.title or "Untitled"
+        StaticPopupDialogs["EBONBUILDS_DELETE_BUILD"].text = "Delete build \"" .. name .. "\"?\n\nThis action cannot be undone."
+        StaticPopup_Show("EBONBUILDS_DELETE_BUILD")
+    end)
+    outer._deleteBtn = deleteBtn
+
     return outer, descText, descScroll, descChild, descBar
 end
 
@@ -201,6 +401,7 @@ local STAT_ROWS = {
 local function BuildStatsTab(parent)
     local y = -10
 
+    -- Left column: Build Statistics header + rows
     local header = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     header:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, y)
     header:SetText("Build Statistics")
@@ -224,33 +425,8 @@ local function BuildStatsTab(parent)
         y = y - 22
     end
 
-    -- Quality distribution
+    -- Most picked / Most banned (left column)
     y = y - 8
-    local qHeader = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    qHeader:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, y)
-    qHeader:SetText("Quality Distribution:")
-
-    y = y - 22
-    local qualityLabels = {}
-    for q = 0, 4 do
-        local qlbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        qlbl:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-        qlbl:SetText(QUALITY_LABELS[q] .. ":")
-        qlbl:SetWidth(100)
-        qlbl:SetJustifyH("LEFT")
-
-        local qval = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        qval:SetPoint("LEFT", qlbl, "RIGHT", 4, 0)
-        qval:SetText("0 (0%)")
-        qval:SetWidth(80)
-        qval:SetJustifyH("RIGHT")
-        qualityLabels[q] = qval
-
-        y = y - 18
-    end
-
-    -- Most picked / Most banned
-    y = y - 6
     local mostPickedLbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     mostPickedLbl:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
     mostPickedLbl:SetText("Most Picked:")
@@ -276,7 +452,80 @@ local function BuildStatsTab(parent)
     mostBannedVal:SetJustifyH("LEFT")
     valueLabels.mostBanned = mostBannedVal
 
-    return valueLabels, qualityLabels
+    -- Right column: Quality Distribution
+    local qy = -10
+    local qHeader = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    qHeader:SetPoint("TOPLEFT", parent, "TOPLEFT", 270, qy)
+    qHeader:SetText("Quality Distribution:")
+
+    qy = qy - 26
+    local qualityLabels = {}
+    for q = 0, 4 do
+        local qlbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        qlbl:SetPoint("TOPLEFT", parent, "TOPLEFT", 274, qy)
+        qlbl:SetText(QUALITY_LABELS[q] .. ":")
+        qlbl:SetWidth(90)
+        qlbl:SetJustifyH("LEFT")
+
+        local qval = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        qval:SetPoint("LEFT", qlbl, "RIGHT", 4, 0)
+        qval:SetText("0 (0%)")
+        qval:SetWidth(80)
+        qval:SetJustifyH("RIGHT")
+        qualityLabels[q] = qval
+
+        qy = qy - 18
+    end
+
+    -- Bottom section: Missing Echoes (full width, 3 columns)
+    local missingHeader = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    missingHeader:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, -250)
+    missingHeader:SetText("Missing Echoes")
+
+    local colNameHdr = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    colNameHdr:SetPoint("TOPLEFT", missingHeader, "BOTTOMLEFT", 4, -4)
+    colNameHdr:SetText("Name")
+    colNameHdr:SetWidth(180)
+    colNameHdr:SetJustifyH("LEFT")
+
+    local colSourceHdr = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    colSourceHdr:SetPoint("LEFT", colNameHdr, "RIGHT", 4, 0)
+    colSourceHdr:SetText("Drop Source")
+    colSourceHdr:SetWidth(200)
+    colSourceHdr:SetJustifyH("LEFT")
+
+    local colScoreHdr = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    colScoreHdr:SetPoint("LEFT", colSourceHdr, "RIGHT", 4, 0)
+    colScoreHdr:SetPoint("TOP", colNameHdr, "TOP", 0, 0)
+    colScoreHdr:SetText("Score")
+    colScoreHdr:SetWidth(54)
+    colScoreHdr:SetJustifyH("RIGHT")
+
+    local missingScroll = CreateFrame("ScrollFrame", nil, parent)
+    missingScroll:SetPoint("TOPLEFT",     colNameHdr, "BOTTOMLEFT",  -4, -2)
+    missingScroll:SetPoint("BOTTOMRIGHT", parent,     "BOTTOMRIGHT", -18, 8)
+
+    local missingChild = CreateFrame("Frame", nil, missingScroll)
+    missingChild:SetWidth(460)
+    missingChild:SetHeight(1)
+    missingScroll:SetScrollChild(missingChild)
+
+    local missingBar = CreateFrame("Slider", nil, missingScroll, "UIPanelScrollBarTemplate")
+    missingBar:SetPoint("TOPLEFT",    missingScroll, "TOPRIGHT",    -2, -4)
+    missingBar:SetPoint("BOTTOMLEFT", missingScroll, "BOTTOMRIGHT", -2,  4)
+    missingBar:SetValueStep(16)
+
+    missingBar:SetScript("OnValueChanged", function(self, value)
+        missingChild:SetPoint("TOPLEFT", missingScroll, "TOPLEFT", 0, value)
+    end)
+    missingScroll:EnableMouseWheel(true)
+    missingScroll:SetScript("OnMouseWheel", function(self, delta)
+        local v = missingBar:GetValue()
+        local mn, mx = missingBar:GetMinMaxValues()
+        missingBar:SetValue(math.max(mn, math.min(mx, v - delta * 16)))
+    end)
+
+    return valueLabels, qualityLabels, missingScroll, missingChild, missingBar
 end
 
 ------------------------------------------------------------------------
@@ -297,6 +546,8 @@ end
 local overviewOuter
 local overviewDescText, overviewDescScroll, overviewDescChild, overviewDescBar
 local statsValueLabels, statsQualityLabels
+local statsMissingScroll, statsMissingChild, statsMissingBar
+local statsMissingRows = {}
 local function RefreshOverview()
     local build = state.build
     if not build then return end
@@ -344,6 +595,14 @@ local function RefreshOverview()
     overviewDescBar:SetMinMaxValues(0, math.max(0, overviewDescChild:GetHeight() - overviewDescScroll:GetHeight()))
 end
 
+local QUALITY_COLORS = {
+    [0] = { 1.0, 1.0, 1.0 },
+    [1] = { 30/255, 1.0, 0.0 },
+    [2] = { 0.0, 112/255, 221/255 },
+    [3] = { 163/255, 53/255, 238/255 },
+    [4] = { 1.0, 128/255, 0.0 },
+}
+
 local function RefreshStats()
     local build = state.build
     if not build or not statsValueLabels then return end
@@ -365,6 +624,91 @@ local function RefreshStats()
     statsValueLabels.mostPicked:SetText(type(mostPickedName) == "string" and mostPickedName or tostring(mostPickedName))
     local mostBannedName = next(st.mostBanned or {}) or "-"
     statsValueLabels.mostBanned:SetText(type(mostBannedName) == "string" and mostBannedName or tostring(mostBannedName))
+
+    -- Missing Echoes (full-width bottom section, 3 columns)
+    if not statsMissingChild then return end
+    for _, btn in ipairs(statsMissingRows) do btn:Hide() end
+    local missing = ComputeMissingEchoes(build)
+    if missing == nil then
+        statsMissingChild.loadingLabel = statsMissingChild.loadingLabel or statsMissingChild:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        statsMissingChild.loadingLabel:SetPoint("TOPLEFT", statsMissingChild, "TOPLEFT", 4, -2)
+        statsMissingChild.loadingLabel:SetText("Requesting data...")
+        statsMissingChild.loadingLabel:Show()
+        statsMissingChild:SetHeight(20)
+        return
+    end
+    if statsMissingChild.loadingLabel then
+        statsMissingChild.loadingLabel:Hide()
+    end
+    local currY = 0
+    for _, entry in ipairs(missing) do
+        local rowIdx = #statsMissingRows + 1
+        -- Ensure we have enough rows in the pool
+        while #statsMissingRows < rowIdx do
+            local n = #statsMissingRows + 1
+            local btn = CreateFrame("Button", nil, statsMissingChild)
+            btn:SetPoint("LEFT", statsMissingChild, "LEFT", 4, 0)
+            btn:SetPoint("RIGHT", statsMissingChild, "RIGHT", -4, 0)
+            btn:RegisterForClicks("LeftButtonUp")
+            btn:SetScript("OnEnter", function(self)
+                if not self._spellId then return end
+                GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+                GameTooltip:ClearLines()
+                local spellName = GetSpellInfo(self._spellId)
+                if spellName then
+                    GameTooltip:AddLine(spellName, 1, 0.82, 0)
+                end
+                if utils and utils.GetSpellDescription then
+                    local desc = utils.GetSpellDescription(self._spellId, 500, 1)
+                    if desc and desc ~= "" then
+                        GameTooltip:AddLine(desc, 1, 1, 1, true)
+                    end
+                end
+                GameTooltip:Show()
+            end)
+            btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            -- Name column
+            local labelName = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            labelName:SetPoint("TOPLEFT", btn, "TOPLEFT", 2, -2)
+            labelName:SetWidth(180)
+            labelName:SetJustifyH("LEFT")
+            btn._labelName = labelName
+            -- Drop Source column (may wrap, drives row height)
+            local labelSource = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            labelSource:SetPoint("TOPLEFT", labelName, "TOPRIGHT", 4, 0)
+            labelSource:SetWidth(200)
+            labelSource:SetJustifyH("LEFT")
+            labelSource:SetTextColor(0.6, 0.6, 0.6, 1)
+            btn._labelSource = labelSource
+            -- Score column
+            local labelScore = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            labelScore:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -4, -2)
+            labelScore:SetWidth(54)
+            labelScore:SetJustifyH("RIGHT")
+            btn._labelScore = labelScore
+            statsMissingRows[n] = btn
+        end
+        local btn = statsMissingRows[rowIdx]
+        btn:ClearAllPoints()
+        btn._spellId = entry.spellId
+        btn._dropSource = entry.dropSource
+        local cc = QUALITY_COLORS[entry.quality] or QUALITY_COLORS[0]
+        btn._labelName:SetText(entry.name)
+        btn._labelName:SetTextColor(cc[1], cc[2], cc[3], 1)
+        local cleanSource = (entry.dropSource or ""):gsub("^Can be found on ", "")
+        btn._labelSource:SetText(cleanSource)
+        btn._labelScore:SetText(string.format("%.0f", entry.score))
+        -- Dynamic row height based on source text wrapping
+        local srcH = btn._labelSource:GetStringHeight() or 16
+        local rowH = math.max(18, srcH + 4)
+        btn:SetHeight(rowH)
+        btn:SetPoint("TOPLEFT", statsMissingChild, "TOPLEFT", 0, -currY)
+        btn:SetPoint("RIGHT", statsMissingChild, "RIGHT", -4, 0)
+        btn:Show()
+        currY = currY + rowH + 2
+    end
+    statsMissingChild:SetHeight(math.max(1, currY))
+    statsMissingBar:SetMinMaxValues(0, math.max(0, statsMissingChild:GetHeight() - statsMissingScroll:GetHeight()))
 end
 ------------------------------------------------------------------------
 -- BuildViewFrame
@@ -402,7 +746,7 @@ local function BuildViewFrame()
     local statsParent = CreateFrame("Frame", nil, contentArea)
     statsParent:SetAllPoints(contentArea)
     statsParent:Hide()
-    statsValueLabels, statsQualityLabels = BuildStatsTab(statsParent)
+    statsValueLabels, statsQualityLabels, statsMissingScroll, statsMissingChild, statsMissingBar = BuildStatsTab(statsParent)
 
     -- Build Logbook tab content (hidden by default)
     local logbookParent = CreateFrame("Frame", nil, contentArea)
@@ -415,6 +759,7 @@ local function BuildViewFrame()
         statsParent:Hide()
         logbookParent:Hide()
         overviewOuter:Show()
+        overviewOuter._deleteBtn:Show()
         PanelTemplates_SetTab(f, 1)
         PanelTemplates_EnableTab(f, 2)
         PanelTemplates_EnableTab(f, 3)
@@ -423,6 +768,7 @@ local function BuildViewFrame()
 
     switchStats = function()
         overviewOuter:Hide()
+        overviewOuter._deleteBtn:Hide()
         logbookParent:Hide()
         statsParent:Show()
         PanelTemplates_SetTab(f, 2)
@@ -433,6 +779,7 @@ local function BuildViewFrame()
 
     switchLogbook = function()
         overviewOuter:Hide()
+        overviewOuter._deleteBtn:Hide()
         statsParent:Hide()
         logbookParent:Show()
         PanelTemplates_SetTab(f, 3)

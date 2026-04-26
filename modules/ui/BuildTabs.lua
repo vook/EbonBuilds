@@ -9,7 +9,7 @@ EbonBuilds.BuildTabs = {}
 local viewFrame
 local contentArea
 local tab1, tab2, tab3, tab4
-local saveBtn, cancelBtn, deleteBtn
+local saveBtn, cancelBtn
 local state = { context = nil }
 
 ------------------------------------------------------------------------
@@ -17,14 +17,7 @@ local state = { context = nil }
 ------------------------------------------------------------------------
 
 local function RefreshButtons()
-    local mode = state.context and state.context.mode
-    if mode == "edit" then
-        deleteBtn:Show()
-        cancelBtn:Hide()
-    else
-        deleteBtn:Hide()
-        cancelBtn:Show()
-    end
+    -- cancel is always visible in both modes
 end
 
 function EbonBuilds.BuildTabs.OnBuildSaved()
@@ -138,12 +131,6 @@ local function BuildViewFrame()
     cancelBtn:SetText("Cancel")
     cancelBtn:SetScript("OnClick", function() EbonBuilds.BuildForm.Cancel() end)
 
-    deleteBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    deleteBtn:SetSize(90, 22)
-    deleteBtn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 8)
-    deleteBtn:SetText("Delete")
-    deleteBtn:SetScript("OnClick", function() EbonBuilds.BuildForm.Delete() end)
-
     return f
 end
 
@@ -167,7 +154,6 @@ function view.Show(container, context)
     viewFrame:SetAllPoints(container)
 
     state.context = context or { mode = "create" }
-    RefreshButtons()
 
     PanelTemplates_SetTab(viewFrame, 1)
     PanelTemplates_EnableTab(viewFrame, 2)
