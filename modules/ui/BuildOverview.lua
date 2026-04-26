@@ -1,7 +1,7 @@
 -- EbonBuilds: modules/ui/BuildOverview.lua
 -- Responsibility: build overview dashboard with tabs (Overview + Stats +
 -- Logbook). Registered as "buildOverview" view. Shows build metadata,
--- permanent echoes, automation toggle, and runtime statistics.
+-- locked echoes, automation toggle, and runtime statistics.
 
 EbonBuilds.BuildOverview = {}
 
@@ -131,7 +131,7 @@ local function ComputeMissingEchoes(build)
     local classMask = CLASS_MASK[build.class] or 0
     local playerLevel = UnitLevel("player")
 
-    -- Read the spellbook's "Echoes" tab to find permanently-learned echo spells.
+    -- Read the spellbook's "Echoes" tab to find locked echo spells.
     -- Spellbook spellIds are in the 300xxx range (Tome spells). The actual echo
     -- data lives in PerkDatabase under 200xxx spellIds. We resolve via
     -- PerkDatabase[spellId].requiredSpell matching the spellbook spellId,
@@ -166,13 +166,13 @@ local function ComputeMissingEchoes(build)
         end
     end
 
-    -- Build permanent echo name set for priority sorting
-    local permLower = {}
-    if build.permanentEchoes then
-        for _, spellId in ipairs(build.permanentEchoes) do
+    -- Build locked echo name set for priority sorting
+    local lockedLower = {}
+    if build.lockedEchoes then
+        for _, spellId in ipairs(build.lockedEchoes) do
             if spellId then
                 local name = GetSpellInfo(spellId)
-                if name then permLower[NormalizeEchoName(name)] = true end
+                if name then lockedLower[NormalizeEchoName(name)] = true end
             end
         end
     end
@@ -223,16 +223,16 @@ local function ComputeMissingEchoes(build)
                 name = entry.displayName,
                 quality = entry.data.quality or 0,
                 dropSource = source,
-                isPermanent = permLower[key] or false,
+                isLocked = lockedLower[key] or false,
                 score = score,
             }
         end
     end
 
-    -- Sort: permanent echoes first, then score desc, then quality desc, then name asc
+    -- Sort: locked echoes first, then score desc, then quality desc, then name asc
     table.sort(missing, function(a, b)
-        if a.isPermanent ~= b.isPermanent then
-            return a.isPermanent
+        if a.isLocked ~= b.isLocked then
+            return a.isLocked
         end
         if a.score ~= b.score then
             return a.score > b.score
@@ -272,16 +272,16 @@ local function BuildOverviewTab(parent)
     metaLabel:SetJustifyH("LEFT")
     outer._metaLabel = metaLabel
 
-    -- Permanent echoes
-    local permHeader = outer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    permHeader:SetPoint("TOPLEFT", metaLabel, "BOTTOMLEFT", 0, -8)
-    permHeader:SetText("Permanent Echoes:")
-    outer._permHeader = permHeader
+    -- Locked echoes
+    local lockedHeader = outer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    lockedHeader:SetPoint("TOPLEFT", metaLabel, "BOTTOMLEFT", 0, -8)
+    lockedHeader:SetText("Locked Echoes:")
+    outer._lockedHeader = lockedHeader
 
-    local permButtons = {}
+    local lockedButtons = {}
     for i = 1, 4 do
         local btn = CreateIconButton(outer, 36)
-        btn:SetPoint("TOPLEFT", permHeader, "BOTTOMLEFT", (i - 1) * 42, -2)
+        btn:SetPoint("TOPLEFT", lockedHeader, "BOTTOMLEFT", (i - 1) * 42, -2)
         local border = btn:CreateTexture(nil, "BORDER")
         border:SetPoint("TOPLEFT",     btn, "TOPLEFT",     -2,  2)
         border:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT",  2, -2)
@@ -296,15 +296,15 @@ local function BuildOverviewTab(parent)
             GameTooltip:Show()
         end)
         btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        permButtons[i] = btn
+        lockedButtons[i] = btn
     end
-    outer._permButtons = permButtons
+    outer._lockedButtons = lockedButtons
 
     -- Automation toggle + Edit button
     local autoToggle = CreateFrame("Button", nil, outer, "UIPanelButtonTemplate")
     autoToggle:SetWidth(140)
     autoToggle:SetHeight(22)
-    autoToggle:SetPoint("TOPLEFT", permButtons[1], "BOTTOMLEFT", 0, -10)
+    autoToggle:SetPoint("TOPLEFT", lockedButtons[1], "BOTTOMLEFT", 0, -10)
     autoToggle:SetText("Automation: ON")
     autoToggle:SetScript("OnClick", function(self)
         local build = state.build
@@ -570,8 +570,8 @@ local function RefreshOverview()
     overviewDescText:SetText(desc)
 
     for i = 1, 4 do
-        local btn = overviewOuter._permButtons[i]
-        local spellId = build.permanentEchoes and build.permanentEchoes[i]
+        local btn = overviewOuter._lockedButtons[i]
+        local spellId = build.lockedEchoes and build.lockedEchoes[i]
         if spellId then
             btn._icon:SetTexture(select(3, GetSpellInfo(spellId)))
             btn._spellId = spellId

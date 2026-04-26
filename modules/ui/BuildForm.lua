@@ -1,6 +1,6 @@
 -- EbonBuilds: modules/ui/BuildForm.lua
 -- Responsibility: create/edit build form with class, spec, title, comments,
--- and 4 indicative permanent-echo slots. Declarative/widget-layout heavy:
+-- and 4 indicative locked-echo slots. Declarative/widget-layout heavy:
 -- template-file exception applies, so the 200-line hard limit is waived here.
 
 EbonBuilds.BuildForm = {}
@@ -39,7 +39,7 @@ local state = {
     class    = nil,
     spec     = 1,
     comments = "",
-    permanent = { nil, nil, nil, nil },
+    locked = { nil, nil, nil, nil },
     settings  = nil,
 }
 function EbonBuilds.BuildForm.GetEditingClass()
@@ -52,9 +52,9 @@ function EbonBuilds.BuildForm.GetEditingSettings()
     return state.settings
 end
 
-function EbonBuilds.BuildForm.GetEditingPermanentEchoes()
+function EbonBuilds.BuildForm.GetEditingLockedEchoes()
     if not state.mode then return nil end
-    return state.permanent
+    return state.locked
 end
 
 local classButtons = {}
@@ -176,7 +176,7 @@ local function BuildSpecGrid(parent, xAnchor, yAnchor)
 end
 
 ------------------------------------------------------------------------
--- Title + Comments + Permanent Echoes
+-- Title + Comments + Locked Echoes
 ------------------------------------------------------------------------
 
 local function CreateBackdropEditBox(parent, width, height, multi)
@@ -217,10 +217,10 @@ local function BuildTitleField(parent, x, y)
     titleBox = box
 end
 
-local function BuildPermanentSlots(parent, x, y)
+local function BuildLockedSlots(parent, x, y)
     local lbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     lbl:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
-    lbl:SetText("Permanent Echoes:")
+    lbl:SetText("Locked Echoes:")
     for i = 1, 4 do
         local btn = CreateIconButton(parent, 36)
         btn:SetPoint("TOPLEFT", parent, "TOPLEFT", x + 140 + (i - 1) * 44, y + 6)
@@ -238,7 +238,7 @@ local function BuildPermanentSlots(parent, x, y)
 
         btn:SetScript("OnClick", function(_, button)
             if button == "RightButton" then
-                state.permanent[i] = nil
+                state.locked[i] = nil
                 btn.spellId = nil
                 btn._quality = nil
                 btn._icon:SetTexture("Interface\\Buttons\\UI-EmptySlot")
@@ -255,7 +255,7 @@ local function BuildPermanentSlots(parent, x, y)
                 end
             end
             EbonBuilds.EchoPicker.Show(function(spellId, quality, name)
-                state.permanent[i] = spellId
+                state.locked[i] = spellId
                 btn.spellId = spellId
                 btn._quality = quality
                 btn._icon:SetTexture(select(3, GetSpellInfo(spellId)))
@@ -372,7 +372,7 @@ local function OnSave()
     if state.mode == "create" then
         local b = EbonBuilds.Build.Create({
             title = state.title, class = state.class, spec = state.spec,
-            comments = state.comments, permanentEchoes = { unpack(state.permanent) },
+            comments = state.comments, lockedEchoes = { unpack(state.locked) },
             settings = state.settings,
         })
         state.mode = "edit"
@@ -381,7 +381,7 @@ local function OnSave()
     else
         EbonBuilds.Build.Save(state.id, {
             title = state.title, class = state.class, spec = state.spec,
-            comments = state.comments, permanentEchoes = { unpack(state.permanent) },
+            comments = state.comments, lockedEchoes = { unpack(state.locked) },
             settings = state.settings,
         })
     end
@@ -434,7 +434,7 @@ local function ApplyStateToInputs()
     RefreshClassSelection()
     RefreshSpecButtons()
     for i = 1, 4 do
-        local id = state.permanent[i]
+        local id = state.locked[i]
         local btn = slotButtons[i]
         btn.spellId = id
         if id then
@@ -475,7 +475,7 @@ local function LoadFromBuild(build)
     state.spec     = build.spec     or 1
     state.comments = build.comments or ""
     state.settings = CloneSettings(build.settings)
-    for i = 1, 4 do state.permanent[i] = build.permanentEchoes and build.permanentEchoes[i] or nil end
+    for i = 1, 4 do state.locked[i] = build.lockedEchoes and build.lockedEchoes[i] or nil end
 end
 
 local function LoadDefaults()
@@ -486,7 +486,7 @@ local function LoadDefaults()
     state.spec     = EbonBuilds.Build.PlayerTopTalentTab()
     state.comments = ""
     state.settings = EbonBuilds.Build.DefaultSettings()
-    for i = 1, 4 do state.permanent[i] = nil end
+    for i = 1, 4 do state.locked[i] = nil end
     EbonBuildsDB.pendingWeights = {}
 end
 
@@ -543,7 +543,7 @@ local function BuildViewFrame()
     BuildClassGrid(f, 10, -36)
     BuildSpecGrid(f, 10, -76)
     BuildTitleField(f, 10, -124)
-    BuildPermanentSlots(f, 10, -160)
+    BuildLockedSlots(f, 10, -160)
     BuildDescriptionField(f, 10, -210, 180)
     return f
 end

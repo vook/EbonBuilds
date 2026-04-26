@@ -122,12 +122,12 @@ local function CreateRow(parent)
     specBtn:SetPoint("TOPLEFT", classBtn, "BOTTOMLEFT", 0, -2)
     row._specBtn = specBtn
 
-    -- Permanent echo icon buttons (22x22, bottom row)
-    row._permBtns = {}
+    -- Locked echo icon buttons (22x22, bottom row)
+    row._lockedBtns = {}
     for i = 1, 4 do
         local btn = CreateIconButton(row, 22)
         btn:Hide()
-        row._permBtns[i] = btn
+        row._lockedBtns[i] = btn
     end
 
     return row
@@ -140,8 +140,8 @@ local function WireNavigate(btn, build)
     end)
 end
 
-local PERM_X_START = 32
-local PERM_STEP    = 28
+local LOCKED_X_START = 32
+local LOCKED_STEP    = 28
 
 local function PopulateRow(row, index, build, activeId)
     local isActive = (build.id == activeId)
@@ -202,13 +202,13 @@ local function PopulateRow(row, index, build, activeId)
         row._specBtn:Hide()
     end
 
-    -- Permanent echo icons
-    local permanents = build.permanentEchoes
+    -- Locked echo icons
+    local lockeds = build.lockedEchoes
     for i = 1, 4 do
-        local btn = row._permBtns[i]
-        local spellId = permanents and permanents[i]
+        local btn = row._lockedBtns[i]
+        local spellId = lockeds and lockeds[i]
         btn:ClearAllPoints()
-        btn:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", PERM_X_START + (i - 1) * PERM_STEP, 4)
+        btn:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", LOCKED_X_START + (i - 1) * LOCKED_STEP, 4)
         if spellId then
             btn._icon:SetTexture(select(3, GetSpellInfo(spellId)))
             btn._spellId = spellId

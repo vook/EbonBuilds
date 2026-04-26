@@ -124,7 +124,7 @@ function EbonBuilds.Build.Migrate()
             class           = PlayerClassToken(),
             spec            = PlayerTopTalentTab(),
             comments        = "",
-            permanentEchoes = { nil, nil, nil, nil },
+            lockedEchoes = { nil, nil, nil, nil },
             echoWeights     = legacy,
             settings        = DefaultSettings(),
             version         = 1,
@@ -182,7 +182,7 @@ function EbonBuilds.Build.Create(data)
         class           = data.class or PlayerClassToken(),
         spec            = data.spec or PlayerTopTalentTab(),
         comments        = data.comments or "",
-        permanentEchoes = data.permanentEchoes or { nil, nil, nil, nil },
+        lockedEchoes = data.lockedEchoes or { nil, nil, nil, nil },
         echoWeights     = EbonBuildsDB.pendingWeights or {},
         settings        = data.settings or DefaultSettings(),
         version         = 1,
@@ -215,7 +215,7 @@ function EbonBuilds.Build.Save(id, data)
     build.class           = data.class           or build.class
     build.spec            = data.spec            or build.spec
     build.comments        = data.comments        or build.comments
-    build.permanentEchoes = data.permanentEchoes or build.permanentEchoes
+    build.lockedEchoes = data.lockedEchoes or build.lockedEchoes
     if data.settings then build.settings = data.settings end
     if data.automationEnabled ~= nil then build.automationEnabled = data.automationEnabled end
     build.version         = (build.version or 1) + 1
