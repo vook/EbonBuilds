@@ -274,14 +274,14 @@ local function BuildOverviewTab(parent)
 
     -- Locked echoes
     local lockedHeader = outer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    lockedHeader:SetPoint("TOPLEFT", metaLabel, "BOTTOMLEFT", 0, -8)
+    lockedHeader:SetPoint("TOPLEFT", metaLabel, "BOTTOMLEFT", 0, -18)
     lockedHeader:SetText("Locked Echoes:")
     outer._lockedHeader = lockedHeader
 
     local lockedButtons = {}
     for i = 1, 4 do
         local btn = CreateIconButton(outer, 36)
-        btn:SetPoint("TOPLEFT", lockedHeader, "BOTTOMLEFT", (i - 1) * 42, -2)
+        btn:SetPoint("TOPLEFT", lockedHeader, "BOTTOMLEFT", (i - 1) * 42, -6)
         local border = btn:CreateTexture(nil, "BORDER")
         border:SetPoint("TOPLEFT",     btn, "TOPLEFT",     -2,  2)
         border:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT",  2, -2)
@@ -304,7 +304,7 @@ local function BuildOverviewTab(parent)
     local autoToggle = CreateFrame("Button", nil, outer, "UIPanelButtonTemplate")
     autoToggle:SetWidth(140)
     autoToggle:SetHeight(22)
-    autoToggle:SetPoint("TOPLEFT", lockedButtons[1], "BOTTOMLEFT", 0, -10)
+    autoToggle:SetPoint("TOPLEFT", lockedButtons[1], "BOTTOMLEFT", 0, -22)
     autoToggle:SetText("Automation: ON")
     autoToggle:SetScript("OnClick", function(self)
         local build = state.build
