@@ -111,6 +111,7 @@ local function BuildCard(parent)
     })
     item:SetBackdropColor(0.12, 0.12, 0.12, 0.9)
     item:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+    item:EnableMouse(true)
 
     item._levelLabel = item:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     item._levelLabel:SetPoint("TOPLEFT", item, "TOPLEFT", 6, -4)
@@ -330,6 +331,10 @@ function EbonBuilds.SessionHistory.RefreshLogView()
 
     if not logScroll or not logChild then return end
     logChild:SetWidth(math.max(logScroll:GetWidth() or 0, 450))
+
+    -- Reset scroll position when switching sessions, otherwise the previous
+    -- scroll offset can push the new rows above the visible area.
+    if logBar then logBar:SetValue(0) end
 
     if not selectedSessionId then
         logChild:SetHeight(1)
