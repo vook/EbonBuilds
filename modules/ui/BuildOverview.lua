@@ -533,10 +533,7 @@ end
 ------------------------------------------------------------------------
 
 local function BuildLogbookTab(parent)
-    local placeholder = parent:CreateFontString(nil, "OVERLAY", "GameFontDisable")
-    placeholder:SetPoint("CENTER", parent, "CENTER")
-    placeholder:SetText("No log entries yet.")
-    return placeholder
+    EbonBuilds.SessionHistory.Show(parent)
 end
 
 ------------------------------------------------------------------------
@@ -785,6 +782,7 @@ local function BuildViewFrame()
         PanelTemplates_SetTab(f, 3)
         PanelTemplates_EnableTab(f, 1)
         PanelTemplates_EnableTab(f, 2)
+        EbonBuilds.SessionHistory.Show(logbookParent)
     end
 
     tab1 = CreateFrame("Button", "EbonBuildsBuildOverviewTab1", f, "OptionsFrameTabButtonTemplate")

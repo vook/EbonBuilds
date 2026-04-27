@@ -127,6 +127,11 @@ local function UpdateStat(build, key)
     end
 end
 
+local function LogAndToast(scored, action, targetIndex)
+    EbonBuilds.Toast.ShowAutomationResult(scored, action, targetIndex)
+    EbonBuilds.Session.LogAction(scored, action, targetIndex)
+end
+
 ------------------------------------------------------------------------
 -- Action attempts (called in priority order)
 ------------------------------------------------------------------------
@@ -210,7 +215,7 @@ function EbonBuilds.Automation.Evaluate()
             if lockedId and lockedId == s.spellId then
                 ProjectEbonhold.PerkService.SelectPerk(s.spellId)
                 UpdateStat(build, "picks")
-                EbonBuilds.Toast.ShowAutomationResult(scored, "Select (Locked)", s.index)
+                LogAndToast(scored, "Select (Locked)", s.index)
                 return true
             end
         end
@@ -229,7 +234,7 @@ function EbonBuilds.Automation.Evaluate()
                     local ok = ProjectEbonhold.PerkService.BanishPerk(s.index - 1)
                     if ok then
                         UpdateStat(build, "banishesUsed")
-                        EbonBuilds.Toast.ShowAutomationResult(scored, "Banish", s.index)
+                        LogAndToast(scored, "Banish", s.index)
                         return true
                     end
                 end
@@ -244,7 +249,7 @@ function EbonBuilds.Automation.Evaluate()
                     local ok = ProjectEbonhold.PerkService.BanishPerk(s.index - 1)
                     if ok then
                         UpdateStat(build, "banishesUsed")
-                        EbonBuilds.Toast.ShowAutomationResult(scored, "Banish", s.index)
+                        LogAndToast(scored, "Banish", s.index)
                         return true
                     end
                 end
@@ -262,7 +267,7 @@ function EbonBuilds.Automation.Evaluate()
             local ok = ProjectEbonhold.PerkService.RequestReroll()
             if ok then
                 UpdateStat(build, "rerollsUsed")
-                EbonBuilds.Toast.ShowAutomationResult(scored, "Reroll", 0)
+                LogAndToast(scored, "Reroll", 0)
                 return true
             end
         end
@@ -297,11 +302,11 @@ function EbonBuilds.Automation.Evaluate()
             local ok = ProjectEbonhold.PerkService.FreezePerk(target.index - 1)
             if ok then
                 UpdateStat(build, "freezesUsed")
-                EbonBuilds.Toast.ShowAutomationResult(scored, "Freeze", target.index)
+                LogAndToast(scored, "Freeze", target.index)
                 -- Freeze is not terminal; proceed to select the best remaining
                 local _, pick = TrySelect(scored, settings, build)
                 if pick then
-                    EbonBuilds.Toast.ShowAutomationResult(scored, "Select", pick.index)
+                    LogAndToast(scored, "Select", pick.index)
                 end
                 return true
             end
@@ -313,7 +318,7 @@ function EbonBuilds.Automation.Evaluate()
     --------------------------------------------------------------------
     local ok, pick = TrySelect(scored, settings, build)
     if ok and pick then
-        EbonBuilds.Toast.ShowAutomationResult(scored, "Select", pick.index)
+        LogAndToast(scored, "Select", pick.index)
     end
     return ok
 end

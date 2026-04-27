@@ -16,6 +16,7 @@ modules/ui/BuildForm.lua
 modules/ui/Filters.lua
 modules/ui/EchoTableRows.lua
 modules/ui/EchoTable.lua
+modules/session/Session.lua
 modules/build/Scoring.lua
 modules/ui/WeightsView.lua
 modules/ui/WelcomeView.lua
@@ -24,4 +25,5 @@ modules/ui/SettingsView.lua
 modules/ui/BuildTabs.lua
 modules/ui/BuildOverview.lua
 modules/ui/Toast.lua
+modules/ui/SessionHistory.lua
 modules/automation/Automation.lua

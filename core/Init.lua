@@ -20,6 +20,8 @@ local function OnAddonLoaded(addonName)
     EbonBuildsDB.minimapAngle = EbonBuildsDB.minimapAngle or 220
 
     EbonBuilds.Build.Migrate()
+    EbonBuilds.Session.Init()
+    EbonBuilds.SessionHistory.Init()
     EbonBuilds.Weights.Init()
     EbonBuilds.Toast.Init()
     EbonBuilds.WelcomeView.Init()
