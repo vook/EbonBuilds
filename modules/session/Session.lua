@@ -5,7 +5,7 @@
 
 EbonBuilds.Session = {}
 
-local POLL_INTERVAL = 5  -- seconds between level checks for reset detection
+local POLL_INTERVAL = 2  -- seconds between level checks for reset detection
 
 local maxLevel     = 0   -- highest level seen in the active session
 local pollFrame    = nil
@@ -142,6 +142,15 @@ function EbonBuilds.Session.EndCurrentSession()
 end
 
 function EbonBuilds.Session.LogAction(scored, action, targetIndex)
+    -- Detect run reset: player is level 1 but we tracked a higher peak.
+    -- This catches resets that happen without a loading screen where
+    -- PLAYER_ENTERING_WORLD never fires.
+    local level = UnitLevel("player")
+    if EbonBuildsDB.currentSessionIndex and level == 1 and maxLevel > 1 then
+        EbonBuilds.Session.EndCurrentSession()
+        CreateSession()
+    end
+
     local idx = EbonBuildsDB.currentSessionIndex
     if not idx then
         -- No active session yet: create one on the fly so logs are never lost
@@ -251,7 +260,7 @@ function EbonBuilds.Session.Init()
     end
 
     -- Event frame for lifecycle detection
-    local ef = CreateFrame("Frame")
+    local ef = CreateFrame("Frame", nil, UIParent)
     ef:RegisterEvent("PLAYER_ENTERING_WORLD")
     ef:RegisterEvent("PLAYER_LEVEL_UP")
     ef:SetScript("OnEvent", function(self, event, ...)
@@ -263,6 +272,6 @@ function EbonBuilds.Session.Init()
     end)
 
     -- Polling frame for level reset detection without loading screen
-    pollFrame = CreateFrame("Frame")
+    pollFrame = CreateFrame("Frame", nil, UIParent)
     pollFrame:SetScript("OnUpdate", OnPollUpdate)
 end
