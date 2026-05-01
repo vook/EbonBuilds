@@ -131,6 +131,17 @@ local function BuildViewFrame()
     cancelBtn:SetText("Cancel")
     cancelBtn:SetScript("OnClick", function() EbonBuilds.BuildForm.Cancel() end)
 
+    local exportBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    exportBtn:SetSize(90, 22)
+    exportBtn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 8)
+    exportBtn:SetText("Export")
+    exportBtn:SetScript("OnClick", function()
+        local build = EbonBuilds.Build.GetActive()
+        if build then
+            EbonBuilds.ExportImport.ShowExportDialog(build)
+        end
+    end)
+
     return f
 end
 

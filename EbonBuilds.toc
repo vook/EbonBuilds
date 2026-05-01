@@ -18,6 +18,7 @@ modules/ui/EchoTableRows.lua
 modules/ui/EchoTable.lua
 modules/session/Session.lua
 modules/build/Scoring.lua
+modules/build/ExportImport.lua
 modules/ui/WeightsView.lua
 modules/ui/WelcomeView.lua
 modules/ui/BonusView.lua

@@ -28,6 +28,7 @@ local rowPool     = {}
 local scrollFrame
 local scrollChild
 local newBuildBtn
+local importBtn
 local titleMeasureFont
 
 ------------------------------------------------------------------------
@@ -261,10 +262,22 @@ EbonBuilds.BuildList.Refresh = Render
 -- Construction
 ------------------------------------------------------------------------
 
-local function CreateNewBuildButton(parent)
+local function CreateImportButton(parent)
+	local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+	btn:SetHeight(24)
+	btn:SetPoint("TOPLEFT",  parent, "TOPLEFT",  0, 0)
+	btn:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, 0)
+	btn:SetText("Import Build")
+	btn:SetScript("OnClick", function()
+		EbonBuilds.ExportImport.ShowImportDialog()
+	end)
+	return btn
+end
+
+local function CreateNewBuildButton(parent, topAnchor)
     local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     btn:SetHeight(24)
-    btn:SetPoint("TOPLEFT",  parent, "TOPLEFT",  0, 0)
+    btn:SetPoint("TOPLEFT",  topAnchor, "BOTTOMLEFT",  0, -2)
     btn:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, 0)
     btn:SetText("+ New Build")
     btn:SetScript("OnClick", function()
@@ -287,7 +300,8 @@ end
 
 function EbonBuilds.BuildList.Init(parent)
     container    = parent
-    newBuildBtn  = CreateNewBuildButton(parent)
+    importBtn    = CreateImportButton(parent)
+    newBuildBtn  = CreateNewBuildButton(parent, importBtn)
     scrollFrame, scrollChild = CreateScrollArea(parent, newBuildBtn)
 
     titleMeasureFont = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
