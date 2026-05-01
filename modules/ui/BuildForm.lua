@@ -394,6 +394,10 @@ local function OnSave()
     if EbonBuilds.BuildTabs and EbonBuilds.BuildTabs.EnableEchoesTab then
         EbonBuilds.BuildTabs.EnableEchoesTab()
     end
+    local active = EbonBuilds.Build.GetActive()
+    if active then
+        EbonBuilds.ViewRouter.Show("buildOverview", { build = active })
+    end
 end
 
 local function OnCancel()

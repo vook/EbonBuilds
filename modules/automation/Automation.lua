@@ -16,11 +16,12 @@ local FAMILY_MAP = {
 
 local EVAL_DELAY = 2  -- seconds before evaluating (TODO: make configurable)
 
-local evalTimerFrame   = nil
-local evalTimerElapsed = 0
-local evalTimerActive  = false
-local pendingChoices   = nil
-local origPerkUIShow   = nil
+local evalTimerFrame    = nil
+local evalTimerElapsed  = 0
+local evalTimerActive   = false
+local pendingChoices    = nil
+local origPerkUIShow    = nil
+local freezeRoundActive = false  -- true after freeze batch, cleared on select
 
 ------------------------------------------------------------------------
 -- Internal helpers
@@ -100,9 +101,9 @@ local function IsProtected(data, whitelist)
     end
     for _, fam in ipairs(families) do
         local key = NormFamily(fam) or fam
-        if not whitelist[key] then return false end
+        if whitelist[key] then return true end
     end
-    return true
+    return false
 end
 
 local function ScoreLockedEcho(lockedId, settings)
@@ -140,9 +141,13 @@ local function TrySelect(scored, settings, build)
     local banList = settings.echoBanList or {}
     local nonBanned, all = {}, {}
     for _, s in ipairs(scored) do
-        all[#all + 1] = s
-        if not banList[s.spellId] then
-            nonBanned[#nonBanned + 1] = s
+        if s.isBanned and s.isProtected then
+            -- Ignored: banned but family-protected
+        else
+            all[#all + 1] = s
+            if not banList[s.spellId] then
+                nonBanned[#nonBanned + 1] = s
+            end
         end
     end
     local candidates = #nonBanned > 0 and nonBanned or all
@@ -187,7 +192,7 @@ function EbonBuilds.Automation.Evaluate()
     local choices = ProjectEbonhold.PerkService.GetCurrentChoice()
     if not choices or #choices == 0 then return false end
 
-    local settings   = build.settings or EbonBuilds.Build.DefaultSettings()
+    local settings   = EbonBuilds.Scoring.GetEffectiveSettings()
     local runData    = GetRunData()
     local lockedList = build.lockedEchoes or {}
 
@@ -234,6 +239,7 @@ function EbonBuilds.Automation.Evaluate()
                     local ok = ProjectEbonhold.PerkService.BanishPerk(s.index - 1)
                     if ok then
                         UpdateStat(build, "banishesUsed")
+                        table.sort(scored, function(a, b) return a.index < b.index end)
                         LogAndToast(scored, "Banish", s.index)
                         return true
                     end
@@ -249,6 +255,7 @@ function EbonBuilds.Automation.Evaluate()
                     local ok = ProjectEbonhold.PerkService.BanishPerk(s.index - 1)
                     if ok then
                         UpdateStat(build, "banishesUsed")
+                        table.sort(scored, function(a, b) return a.index < b.index end)
                         LogAndToast(scored, "Banish", s.index)
                         return true
                     end
@@ -256,6 +263,10 @@ function EbonBuilds.Automation.Evaluate()
             end
         end
     end
+
+    -- Restore original display order (left-to-right by index) after the
+    -- banish step may have re-sorted by score.
+    table.sort(scored, function(a, b) return a.index < b.index end)
 
     --------------------------------------------------------------------
     -- 2. TRY REROLL
@@ -276,7 +287,7 @@ function EbonBuilds.Automation.Evaluate()
     --------------------------------------------------------------------
     -- 3. TRY FREEZE
     --------------------------------------------------------------------
-    if runData and (runData.totalFreezes or 0) - (runData.usedFreezes or 0) > 0 then
+    if not freezeRoundActive and runData and (runData.totalFreezes or 0) - (runData.usedFreezes or 0) > 0 then
         local threshold = math.floor(peakScore * settings.autoFreezePct / 100)
 
         -- Offered choices above freeze threshold
@@ -296,18 +307,34 @@ function EbonBuilds.Automation.Evaluate()
             end
         end
 
-        if (#aboveChoices + lockedAbove) >= 2 and #aboveChoices > 0 then
+        -- Requires at least 2 offered echoes above threshold so we can
+        -- freeze the lower-scored ones and select a different highest one.
+        if (#aboveChoices + lockedAbove) >= 2 and #aboveChoices >= 2 then
             table.sort(aboveChoices, function(a, b) return a.score > b.score end)
-            local target = aboveChoices[1]
-            local ok = ProjectEbonhold.PerkService.FreezePerk(target.index - 1)
-            if ok then
-                UpdateStat(build, "freezesUsed")
-                LogAndToast(scored, "Freeze", target.index)
-                -- Freeze is not terminal; proceed to select the best remaining
-                local _, pick = TrySelect(scored, settings, build)
-                if pick then
-                    LogAndToast(scored, "Select", pick.index)
+
+            -- Freeze lower-scored echoes first; highest will be selected after delay
+            local freezesAvailable = (runData.totalFreezes or 0) - (runData.usedFreezes or 0)
+            local penalty = (settings.freezePenaltyPct or 0) / 100
+            local anyFrozen = false
+
+            for i = #aboveChoices, 2, -1 do
+                if freezesAvailable <= 0 then break end
+                local target = aboveChoices[i]
+                local ok = ProjectEbonhold.PerkService.FreezePerk(target.index - 1)
+                if ok then
+                    UpdateStat(build, "freezesUsed")
+                    freezesAvailable = freezesAvailable - 1
+                    anyFrozen = true
+                    if penalty > 0 then
+                        target.score = target.score * (1 - penalty)
+                    end
+                    LogAndToast(scored, "Freeze", target.index)
                 end
+            end
+
+            if anyFrozen then
+                freezeRoundActive = true
+                StartEvalTimer()
                 return true
             end
         end
@@ -318,7 +345,10 @@ function EbonBuilds.Automation.Evaluate()
     --------------------------------------------------------------------
     local ok, pick = TrySelect(scored, settings, build)
     if ok and pick then
+        freezeRoundActive = false
         LogAndToast(scored, "Select", pick.index)
+    else
+        freezeRoundActive = false
     end
     return ok
 end

@@ -85,7 +85,7 @@ function EbonBuilds.Scoring.ComputePeak(classToken, settings)
         local e = list[i]
         if MatchesClass(e, bitVal) then
             local w  = EbonBuilds.Weights.Get(e.name) or 0
-            local sc = EbonBuilds.Scoring.Score(e, w, settings)
+            local sc = EbonBuilds.Scoring.ScorePerQuality(e, w, settings, e.quality)
             if bestScore == nil or sc > bestScore then
                 bestScore, bestName = sc, e.name
             end
@@ -124,9 +124,11 @@ function EbonBuilds.Scoring.IsBanned(spellId)
 end
 
 function EbonBuilds.Scoring.GetEffectiveSettings()
-    if EbonBuilds.BuildForm and EbonBuilds.BuildForm.GetEditingSettings then
-        local s = EbonBuilds.BuildForm.GetEditingSettings()
-        if s then return s end
+    if EbonBuilds.ViewRouter and EbonBuilds.ViewRouter.Current() == "buildTabs" then
+        if EbonBuilds.BuildForm and EbonBuilds.BuildForm.GetEditingSettings then
+            local s = EbonBuilds.BuildForm.GetEditingSettings()
+            if s then return s end
+        end
     end
     local build = EbonBuilds.Build.GetActive()
     if build and build.settings then return build.settings end

@@ -26,6 +26,7 @@ local selectedSessionId = nil
 local sessionChild, sessionClip, scrollOffset = nil, nil, 0
 local logScroll, logChild, logBar
 local durationTimer
+local logRefreshTimer
 
 ------------------------------------------------------------------------
 -- Helpers
@@ -332,12 +333,14 @@ function EbonBuilds.SessionHistory.RefreshLogView()
     if not logScroll or not logChild then return end
     logChild:SetWidth(math.max(logScroll:GetWidth() or 0, 450))
 
-    -- Reset scroll position when switching sessions, otherwise the previous
-    -- scroll offset can push the new rows above the visible area.
-    if logBar then logBar:SetValue(0) end
+    -- Track session switch so we only reset scroll when the session changes
+    local prevSessionId = logChild._sessionId
+    local sessionSwitched = (selectedSessionId ~= prevSessionId)
 
     if not selectedSessionId then
         logChild:SetHeight(1)
+        logChild._sessionId = nil
+        if logBar then logBar:SetMinMaxValues(0, 0) end
         return
     end
 
@@ -348,7 +351,18 @@ function EbonBuilds.SessionHistory.RefreshLogView()
     end
     if not session then
         logChild:SetHeight(1)
+        logChild._sessionId = nil
+        if logBar then logBar:SetMinMaxValues(0, 0) end
         return
+    end
+
+    logChild._sessionId = selectedSessionId
+
+    -- Only reset scroll position when switching sessions
+    local savedScroll = logBar and logBar:GetValue() or 0
+    if sessionSwitched and logBar then
+        savedScroll = 0
+        logBar:SetValue(0)
     end
 
     local logs = session.logs or {}
@@ -413,6 +427,14 @@ function EbonBuilds.SessionHistory.RefreshLogView()
 
     local totalH = math.max(#logs * ROW_H + 4, logScroll:GetHeight())
     logChild:SetHeight(totalH)
+    if logBar then
+        local mx = math.max(0, totalH - logScroll:GetHeight())
+        logBar:SetMinMaxValues(0, mx)
+        -- Restore scroll position after content refresh (clamp to new max)
+        if not sessionSwitched then
+            logBar:SetValue(math.min(savedScroll, mx))
+        end
+    end
 end
 
 ------------------------------------------------------------------------
@@ -423,7 +445,7 @@ local exportDialog
 
 local function BuildExportDialog()
     local f = CreateFrame("Frame", "EbonBuildsExportDialog", UIParent)
-    f:SetSize(520, 380)
+    f:SetSize(800, 550)
     f:SetPoint("CENTER")
     f:SetBackdrop({
         bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
@@ -433,7 +455,7 @@ local function BuildExportDialog()
     })
     f:SetBackdropColor(0, 0, 0, 0.9)
     f:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
-    f:SetFrameStrata("DIALOG")
+    f:SetFrameStrata("FULLSCREEN_DIALOG")
     f:EnableMouse(true)
     f:SetMovable(true)
     f:SetScript("OnMouseDown", function(self, button)
@@ -681,6 +703,21 @@ function EbonBuilds.SessionHistory.Show(container)
     logChild:SetWidth(math.max(logScroll:GetWidth() or 0, 450))
     EbonBuilds.SessionHistory.RefreshSessionList()
     EbonBuilds.SessionHistory.RefreshLogView()
+
+    -- Periodic refresh while visible so new automation actions appear live
+    if not logRefreshTimer then
+        logRefreshTimer = CreateFrame("Frame")
+        logRefreshTimer._elapsed = 0
+        logRefreshTimer:SetScript("OnUpdate", function(self, dt)
+            self._elapsed = self._elapsed + dt
+            if self._elapsed < 2 then return end
+            self._elapsed = 0
+            EbonBuilds.SessionHistory.RefreshSessionList()
+            EbonBuilds.SessionHistory.RefreshLogView()
+        end)
+    end
+    logRefreshTimer._elapsed = 0
+    logRefreshTimer:Show()
 end
 
 function EbonBuilds.SessionHistory.Hide()
@@ -690,6 +727,9 @@ function EbonBuilds.SessionHistory.Hide()
     if durationTimer then
         durationTimer:Hide()
         activeSessionCard = nil
+    end
+    if logRefreshTimer then
+        logRefreshTimer:Hide()
     end
 end
 
