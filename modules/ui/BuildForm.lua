@@ -370,12 +370,14 @@ end
 local function OnSave()
     CollectFromInputs()
     if state.title == "" then return end
+    local weights = EbonBuildsDB.pendingWeights
     if state.mode == "create" then
         local b = EbonBuilds.Build.Create({
             title = state.title, class = state.class, spec = state.spec,
             comments = state.comments, lockedEchoes = { unpack(state.locked) },
             settings = state.settings,
             isPublic = state.isPublic,
+            echoWeights = weights,
         })
         state.mode = "edit"
         state.id   = b.id
@@ -386,8 +388,11 @@ local function OnSave()
             comments = state.comments, lockedEchoes = { unpack(state.locked) },
             settings = state.settings,
             isPublic = state.isPublic,
+            echoWeights = weights,
         })
     end
+    EbonBuildsDB._isEditingBuild = nil
+    EbonBuildsDB.pendingWeights = nil
     if EbonBuilds.BuildList and EbonBuilds.BuildList.Refresh then
         EbonBuilds.BuildList.Refresh()
     end
@@ -404,6 +409,8 @@ local function OnSave()
 end
 
 local function OnCancel()
+    EbonBuildsDB._isEditingBuild = nil
+    EbonBuildsDB.pendingWeights = nil
     local active = EbonBuilds.Build.GetActive()
     if active then
         EbonBuilds.ViewRouter.Show("buildOverview", { build = active })
@@ -414,6 +421,8 @@ end
 
 local function OnDelete()
     if not state.id then return end
+    EbonBuildsDB._isEditingBuild = nil
+    EbonBuildsDB.pendingWeights = nil
     EbonBuilds.Build.Delete(state.id)
     if EbonBuilds.BuildList and EbonBuilds.BuildList.Refresh then
         EbonBuilds.BuildList.Refresh()
@@ -485,6 +494,13 @@ local function LoadFromBuild(build)
     state.settings = CloneSettings(build.settings)
     state.isPublic = build.isPublic or false
     for i = 1, 4 do state.locked[i] = build.lockedEchoes and build.lockedEchoes[i] or nil end
+    EbonBuildsDB._isEditingBuild = true
+    EbonBuildsDB.pendingWeights = {}
+    if build.echoWeights then
+        for name, weight in pairs(build.echoWeights) do
+            EbonBuildsDB.pendingWeights[name] = weight
+        end
+    end
 end
 
 local function LoadDefaults()
@@ -497,6 +513,7 @@ local function LoadDefaults()
     state.settings = EbonBuilds.Build.DefaultSettings()
     state.isPublic = false
     for i = 1, 4 do state.locked[i] = nil end
+    EbonBuildsDB._isEditingBuild = true
     EbonBuildsDB.pendingWeights = {}
 end
 

@@ -222,6 +222,7 @@ local function BuildExportData(build)
 		validated = build.validated or false,
 		author = build.author,
 		lastModified = build.lastModified,
+		copiedFrom = build.copiedFrom or nil,
 	}
 end
 
@@ -263,6 +264,7 @@ function EbonBuilds.ExportImport.DecodeBuild(b64String)
 		validated   = data.validated or false,
 		author      = data.author,
 		lastModified = data.lastModified,
+		copiedFrom  = data.copiedFrom or nil,
 	})
 	EbonBuilds.Build.EnsureSettings(build)
 	return build

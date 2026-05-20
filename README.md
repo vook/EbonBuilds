@@ -12,7 +12,7 @@ EbonBuilds lets you create *builds* — class-specific profiles with weighted ec
 
 ### Opening the Addon
 
-Click the **minimap button** (book icon) or type `/eb` to toggle the main window.
+Click the **minimap button** (book icon) or type `/ebb` to toggle the main window.
 
 ### Creating a Build
 
@@ -101,7 +101,34 @@ Three-tab dashboard for the active build:
 ### Export / Import
 - Export builds to base64-encoded JSON (echoes without weight are excluded to keep payloads small)
 - Import builds from base64 strings pasted into the import dialog
+- Payload includes author, lastModified, isPublic, and validated fields for sync compatibility
 - All settings, weights, locked echoes, and automation configuration are preserved
+
+### Public Builds Browser
+- Dedicated view listing all public builds shared by other players on the realm
+- Class and specialization dropdown filters with "All Classes" / "All Specs" options
+- Per-build smart buttons: **Import** (new), **Update** (incoming version is newer), or **Loaded** (already imported and up-to-date)
+- Import tracking via `importedFrom` and `_importedAt` prevents duplicate entries
+- Filtering logic hides builds already owned by UUID or imported with an up-to-date timestamp
+
+### Peer-to-Peer Sync
+- Hidden chat channel (`EbonBuildsSync`) for automatic peer discovery
+- Known-peers fallback via WHISPER for cross-realm or guildless scenarios
+- Batch protocol: `LST` (list 3 UUIDs + epochs) → `WNT`/`SKP` (want/skip) → `BLD` (chunked build data) → `END`
+- 180-byte chunks with inflight reassembly keyed by `sender:buildId`
+- 50 ms rate limiting on all outgoing SendAddonMessage calls
+- Epoch-based date comparison in batch listings for compact payloads
+- ISQ-to-Unix conversion (`IsoToEpoch`) for lexicographic → numeric date checks
+- 15-second timeouts on inflight chunks and pending batches (cleanup on disconnect)
+- `pcall`-wrapped assembly prevents corrupt payloads from breaking the event handler
+- Incremental UI updates: PublicBuildsView refreshes per received build, BuildList at END
+- Build validation gate: `PLAYER_LEVEL_UP` marks the active build as `validated` at level 80; gated by `VALIDATION_REQUIRED` toggle (disabled by default)
+
+### Build Identity
+- **ObjectId** 24-character hex identifiers (`693d8a00a3f1b29c7e4d0011`) replacing `timestamp-random-playername` UUIDs
+- Automatic migration of old-format UUIDs on addon load (`MigrateIds`)
+- Checksum-based change detection: `lastModified` only updates when build data actually differs
+- `Build.UpdateFromPublic` merges remote build data into a local copy, preserving UUID and stats
 
 ### Toast Notifications
 - Action summaries with inline echo names, scores, and target highlighting
@@ -112,7 +139,6 @@ Three-tab dashboard for the active build:
 
 ## Planned Features
 
-- **Public builds browser**: browse and import builds shared by other players (button placeholder exists on the welcome screen)
 - **Configurable evaluation delay**: expose the 2-second automation delay as a user setting
 - **Build versioning and change history**: track and review build changes over time
 - **Multi-build comparison**: compare scoring differences between builds side-by-side
@@ -129,7 +155,7 @@ Three-tab dashboard for the active build:
 
 | Command | Alias | Description |
 |---|---|---|
-| `/eb` | — | Toggle the EbonBuilds main window |
+| `/ebb` | `/ebonbuilds` | Toggle the EbonBuilds main window |
 
 ---
 

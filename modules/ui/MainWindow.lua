@@ -124,6 +124,12 @@ function EbonBuilds.MainWindow._ShowInitialView()
     end
 end
 
+SLASH_EbonBuilds1 = "/ebb"
+SLASH_EbonBuilds2 = "/ebonbuilds"
+SlashCmdList["EbonBuilds"] = function()
+    EbonBuilds.MainWindow.Toggle()
+end
+
 function EbonBuilds.MainWindow.Toggle()
     local frame = EbonBuilds.MainWindow._frame
     if not frame then return end
