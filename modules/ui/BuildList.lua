@@ -29,6 +29,7 @@ local scrollFrame
 local scrollChild
 local newBuildBtn
 local importBtn
+local publicBuildsBtn
 local titleMeasureFont
 
 ------------------------------------------------------------------------
@@ -262,16 +263,28 @@ EbonBuilds.BuildList.Refresh = Render
 -- Construction
 ------------------------------------------------------------------------
 
+local function CreatePublicBuildsButton(parent)
+    local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    btn:SetHeight(24)
+    btn:SetPoint("TOPLEFT",  parent, "TOPLEFT",  0, 0)
+    btn:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, 0)
+    btn:SetText("Public Builds")
+    btn:SetScript("OnClick", function()
+        EbonBuilds.ViewRouter.Show("publicBuilds")
+    end)
+    return btn
+end
+
 local function CreateImportButton(parent)
-	local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-	btn:SetHeight(24)
-	btn:SetPoint("TOPLEFT",  parent, "TOPLEFT",  0, 0)
-	btn:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, 0)
-	btn:SetText("Import Build")
-	btn:SetScript("OnClick", function()
-		EbonBuilds.ExportImport.ShowImportDialog()
-	end)
-	return btn
+    local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    btn:SetHeight(24)
+    btn:SetPoint("TOPLEFT",  parent, "TOPLEFT",  0, 0)
+    btn:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, 0)
+    btn:SetText("Import Build")
+    btn:SetScript("OnClick", function()
+        EbonBuilds.ExportImport.ShowImportDialog()
+    end)
+    return btn
 end
 
 local function CreateNewBuildButton(parent, topAnchor)
@@ -299,10 +312,14 @@ local function CreateScrollArea(parent, topAnchor)
 end
 
 function EbonBuilds.BuildList.Init(parent)
-    container    = parent
-    importBtn    = CreateImportButton(parent)
-    newBuildBtn  = CreateNewBuildButton(parent, importBtn)
+    container       = parent
+    publicBuildsBtn = CreatePublicBuildsButton(parent)
+    importBtn       = CreateImportButton(parent)
+    newBuildBtn     = CreateNewBuildButton(parent, importBtn)
     scrollFrame, scrollChild = CreateScrollArea(parent, newBuildBtn)
+
+    importBtn:SetPoint("TOPLEFT",  publicBuildsBtn, "BOTTOMLEFT",  0, -2)
+    importBtn:SetPoint("TOPRIGHT", parent,          "TOPRIGHT",    0,  0)
 
     titleMeasureFont = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     titleMeasureFont:Hide()

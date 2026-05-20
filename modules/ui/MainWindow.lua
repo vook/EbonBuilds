@@ -90,6 +90,7 @@ function EbonBuilds.MainWindow.Init()
     EbonBuilds.SettingsView.Init()
     EbonBuilds.BuildTabs.Init()
     EbonBuilds.BuildOverview.Init()
+    EbonBuilds.PublicBuildsView.Init()
 
     EbonBuilds.ViewRouter.Register("welcome", {
         Show = function(container, _)
@@ -97,6 +98,15 @@ function EbonBuilds.MainWindow.Init()
         end,
         Hide = function()
             EbonBuilds.WelcomeView.Unmount()
+        end,
+    })
+
+    EbonBuilds.ViewRouter.Register("publicBuilds", {
+        Show = function(container, _)
+            EbonBuilds.PublicBuildsView.Mount(container)
+        end,
+        Hide = function()
+            EbonBuilds.PublicBuildsView.Unmount()
         end,
     })
 

@@ -38,7 +38,7 @@ local function BuildViewFrame(parent)
     publicBtn:SetPoint("TOP", newBtn, "BOTTOM", 0, -8)
     publicBtn:SetText("Public Builds")
     publicBtn:SetScript("OnClick", function()
-        -- Placeholder: public builds browser will be implemented later
+        EbonBuilds.ViewRouter.Show("publicBuilds")
     end)
 
     return f

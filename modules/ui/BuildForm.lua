@@ -41,6 +41,7 @@ local state = {
     comments = "",
     locked = { nil, nil, nil, nil },
     settings  = nil,
+    isPublic  = false,
 }
 function EbonBuilds.BuildForm.GetEditingClass()
     return state.class
@@ -60,7 +61,7 @@ end
 local classButtons = {}
 local specButtons  = {}
 local slotButtons  = {}
-local titleBox, commentsBox
+local titleBox, commentsBox, publicToggle
 
 -- Global single-install hook: shift-click links go into the comments editbox
 -- when it is focused. Guarded so we never install twice.
@@ -374,6 +375,7 @@ local function OnSave()
             title = state.title, class = state.class, spec = state.spec,
             comments = state.comments, lockedEchoes = { unpack(state.locked) },
             settings = state.settings,
+            isPublic = state.isPublic,
         })
         state.mode = "edit"
         state.id   = b.id
@@ -383,6 +385,7 @@ local function OnSave()
             title = state.title, class = state.class, spec = state.spec,
             comments = state.comments, lockedEchoes = { unpack(state.locked) },
             settings = state.settings,
+            isPublic = state.isPublic,
         })
     end
     if EbonBuilds.BuildList and EbonBuilds.BuildList.Refresh then
@@ -437,6 +440,7 @@ local function ApplyStateToInputs()
     RefreshDescriptionPlaceholder()
     RefreshClassSelection()
     RefreshSpecButtons()
+    publicToggle:SetText(state.isPublic and "Public" or "Make Public")
     for i = 1, 4 do
         local id = state.locked[i]
         local btn = slotButtons[i]
@@ -479,6 +483,7 @@ local function LoadFromBuild(build)
     state.spec     = build.spec     or 1
     state.comments = build.comments or ""
     state.settings = CloneSettings(build.settings)
+    state.isPublic = build.isPublic or false
     for i = 1, 4 do state.locked[i] = build.lockedEchoes and build.lockedEchoes[i] or nil end
 end
 
@@ -490,6 +495,7 @@ local function LoadDefaults()
     state.spec     = EbonBuilds.Build.PlayerTopTalentTab()
     state.comments = ""
     state.settings = EbonBuilds.Build.DefaultSettings()
+    state.isPublic = false
     for i = 1, 4 do state.locked[i] = nil end
     EbonBuildsDB.pendingWeights = {}
 end
@@ -543,6 +549,15 @@ local function BuildViewFrame()
     local header = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     header:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -10)
     header:SetText("Build")
+
+    publicToggle = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    publicToggle:SetSize(120, 22)
+    publicToggle:SetPoint("TOPRIGHT", f, "TOPRIGHT", -10, -10)
+    publicToggle:SetText("Make Public")
+    publicToggle:SetScript("OnClick", function(self)
+        state.isPublic = not state.isPublic
+        self:SetText(state.isPublic and "Public" or "Make Public")
+    end)
 
     BuildClassGrid(f, 10, -36)
     BuildSpecGrid(f, 10, -76)

@@ -1,8 +1,10 @@
 # EbonBuilds
 
-A **build-based echo automation addon** for **[ProjectEbonhold](https://github.com/vook/EbonBuilds)**, a World of Warcraft 3.3.5a (Wrath of the Lich King) roguelike server.
+A **build-based echo automation addon** for **[ProjectEbonhold](https://github.com/vook/EbonBuilds)**, a World of Warcraft 3.3.5a (Wrath of the Lich King) roguelite server.
 
 EbonBuilds lets you create *builds* — class-specific profiles with weighted echo preferences, scoring rules, and automation thresholds. When echoes are offered during a run, the automation engine evaluates every choice against your active build and executes the optimal action automatically.
+
+**Repository:** [github.com/powerfulqa/EbonClearance](https://github.com/powerfulqa/EbonClearance)
 
 ---
 
