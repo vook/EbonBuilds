@@ -283,9 +283,30 @@ local function BuildOverviewTab(parent)
     metaLabel:SetJustifyH("LEFT")
     outer._metaLabel = metaLabel
 
+    -- Public / Validated status (button frame for tooltip support)
+    local statusFrame = CreateFrame("Button", nil, outer)
+    statusFrame:SetPoint("TOPLEFT",     metaLabel, "BOTTOMLEFT", 0, -12)
+    statusFrame:SetPoint("RIGHT",       outer,     "RIGHT",      -10, 0)
+    statusFrame:SetHeight(16)
+    local statusLabel = statusFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    statusLabel:SetAllPoints(statusFrame)
+    statusLabel:SetJustifyH("LEFT")
+    statusFrame:SetScript("OnEnter", function(self)
+        local build = state.build
+        if not build or not build.isPublic then return end
+        GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+        GameTooltip:ClearLines()
+        GameTooltip:AddLine("Public Build", 1, 0.82, 0, 1)
+        GameTooltip:AddLine("Public builds require validation to appear in the browser.", 0.8, 0.8, 0.8, 1)
+        GameTooltip:AddLine("Level a character from 1 to 80 using this build to validate it.", 0.6, 0.6, 0.6, 1)
+        GameTooltip:Show()
+    end)
+    statusFrame:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    outer._statusLabel = statusLabel
+
     -- Locked echoes
     local lockedHeader = outer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    lockedHeader:SetPoint("TOPLEFT", metaLabel, "BOTTOMLEFT", 0, -18)
+    lockedHeader:SetPoint("TOPLEFT", statusLabel, "BOTTOMLEFT", 0, -14)
     lockedHeader:SetText("Locked Echoes:")
     outer._lockedHeader = lockedHeader
 
@@ -555,6 +576,18 @@ local function RefreshOverview()
         build.author or "Unknown",
         specName,
         build.lastModified or ""))
+
+    -- Public / Validated status
+    local publicText = build.isPublic and "|cff19ff19Public|r" or "|cff888888Private|r"
+    local validatedText
+    if build.validated then
+        validatedText = " |cff19ff19(Validated)|r"
+    elseif build.isPublic then
+        validatedText = " |cffff4444(Not Validated)|r"
+    else
+        validatedText = ""
+    end
+    overviewOuter._statusLabel:SetText(publicText .. validatedText)
 
     overviewOuter._autoToggle:SetText(build.automationEnabled and "Automation: ON" or "Automation: OFF")
 
