@@ -68,7 +68,7 @@ local function IsArray(tbl)
 	return count == maxIdx
 end
 
-EbonBuilds.ExportImport.JSONEncode = function(value)
+local function JSONEncode(value)
 	local t = type(value)
 	if t == "nil" then return "null"
 	elseif t == "boolean" then return value and "true" or "false"
@@ -95,6 +95,8 @@ EbonBuilds.ExportImport.JSONEncode = function(value)
 	end
 	return "null"
 end
+
+EbonBuilds.ExportImport.JSONEncode = JSONEncode
 
 ------------------------------------------------------------------------
 -- Minimal JSON decoder
