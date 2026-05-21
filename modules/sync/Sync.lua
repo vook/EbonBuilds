@@ -7,14 +7,25 @@
 EbonBuilds.Sync = {}
 
 local PREFIX        = "EbonBuilds"
-local SYNC_CHANNEL  = "EbonBuildsSync"
+local SYNC_CHANNEL  = "ebonbuildssync"
+
+-- Must be called at file scope (during addon load), not inside ADDON_LOADED event
+if RegisterAddonMessagePrefix then
+    RegisterAddonMessagePrefix(PREFIX)
+end
 local MAX_CHUNK     = 180
 local SYNC_TIMEOUT  = 15
 local BATCH_SIZE    = 3
 local WANT_TIMEOUT  = 15
+local REQ_COOLDOWN  = 30
+
+-- Bump this to invalidate remote builds from older addon versions.
+-- Only affects builds that have NOT been imported — imported builds stay.
+local SYNC_VERSION  = 1
 
 -- Set to true to only share builds that reached level 80 while active
-local VALIDATION_REQUIRED = false
+local VALIDATION_REQUIRED = true
+local VERBOSE_LOG = false
 
 local syncFrame
 local syncChannelIndex
@@ -23,6 +34,8 @@ local sendQueue = {}
 local nextSendTime = 0
 local SEND_DELAY = 0.05
 local pendingBatches = {}
+local lastRequestTime = 0
+local channelRetries = { remaining = 0, payload = nil, nextTime = 0 }
 
 local function Now()
     return GetTime()
@@ -32,8 +45,17 @@ local function Log(msg)
     DEFAULT_CHAT_FRAME:AddMessage("|cff33ccff[EbonBuilds Sync]|r " .. msg)
 end
 
+local function VerboseLog(msg)
+    if VERBOSE_LOG then Log(msg) end
+end
+
 local function SortableNow()
     return date("%Y-%m-%d %H:%M:%S")
+end
+
+local function IsSyncChannelName(name)
+    if type(name) ~= "string" then return false end
+    return name:lower():find(SYNC_CHANNEL, 1, true) ~= nil
 end
 
 local function SixtyDaysAgo()
@@ -51,18 +73,39 @@ local function IsoToEpoch(iso)
     return ok and result or 0
 end
 
+-- Handles both ISO (YYYY-MM-DD HH:MM:SS) and US (MM/DD/YY HH:MM:SS) formats
+local function DateToEpoch(d)
+    if not d or d == "" then return 0 end
+    -- Try ISO first: 2026-05-20 16:35:08
+    local epoch = IsoToEpoch(d)
+    if epoch > 0 then return epoch end
+    -- Try US format: 05/19/26 17:51:39  (two-digit year)
+    local m, day, y, h, min, s = d:match("^(%d+)/(%d+)/(%d+) (%d+):(%d+):(%d+)$")
+    if not m then return 0 end
+    -- Normalize two-digit year: 26 → 2026
+    local year = tonumber(y)
+    if year < 100 then year = year + 2000 end
+    local ok, result = pcall(time, {
+        year = year, month = tonumber(m), day = tonumber(day),
+        hour = tonumber(h), min = tonumber(min), sec = tonumber(s),
+    })
+    return ok and result or 0
+end
+
 ------------------------------------------------------------------------
 -- Channel management
 ------------------------------------------------------------------------
 
 local function FindOrJoinChannel()
     for i = 1, 10 do
-        local name = GetChannelName(i)
-        if name == SYNC_CHANNEL then
+        local raw = GetChannelName(i)
+        if IsSyncChannelName(raw) then
             return i
         end
     end
-    return JoinChannelByName(SYNC_CHANNEL)
+    local idx = JoinChannelByName(SYNC_CHANNEL)
+    if idx and idx > 0 then return idx end
+    return nil
 end
 
 local function HideChannelFromChat()
@@ -75,9 +118,11 @@ local function HideChannelFromChat()
 end
 
 local function RefreshChannel()
-    if not syncChannelIndex or GetChannelName(syncChannelIndex) ~= SYNC_CHANNEL then
+    if not syncChannelIndex or syncChannelIndex == 0 then
         syncChannelIndex = FindOrJoinChannel()
-        HideChannelFromChat()
+        if syncChannelIndex and syncChannelIndex > 0 then
+            HideChannelFromChat()
+        end
     end
 end
 
@@ -86,6 +131,7 @@ end
 ------------------------------------------------------------------------
 
 local function Enqueue(target, payload)
+    if not target or target == "" or not payload then return end
     sendQueue[#sendQueue + 1] = { target = target, payload = payload }
 end
 
@@ -131,24 +177,35 @@ local function AssembleBuild(sender, buildId, base64)
     local imported = EbonBuilds.ExportImport.DecodeBuild(base64)
     if not imported then return end
 
+    EbonBuildsDB.remoteBuilds = EbonBuildsDB.remoteBuilds or {}
+
+    -- If the user already owns this build by UUID (e.g. they are the author),
+    -- update it in-place.
     local existing = EbonBuildsDB.builds[buildId]
     if existing then
-        Log("Build " .. buildId .. " already exists locally, checking dates...")
         local incomingDate = imported.lastModified or ""
         local localDate   = existing.lastModified or ""
         if incomingDate > localDate then
             EbonBuilds.Build.UpdateFromPublic(existing, imported)
             Log("Build " .. buildId .. " updated (incoming=" .. incomingDate .. " > local=" .. localDate .. ")")
-        else
-            Log("Build " .. buildId .. " skipped (local date is same or newer)")
+        end
+        return
+    end
+
+    -- Store in remote builds (market), not in local collection
+    local rb = EbonBuildsDB.remoteBuilds[buildId]
+    if rb then
+        local incomingDate = imported.lastModified or ""
+        local storedDate   = rb.lastModified or ""
+        if incomingDate > storedDate then
+            imported.id = buildId
+            EbonBuildsDB.remoteBuilds[buildId] = imported
+            Log("Build " .. buildId .. " updated in remote (incoming=" .. incomingDate .. ")")
         end
     else
-        imported.id          = buildId
-        imported.importedFrom = buildId
-        imported._importedAt = imported.lastModified
-        imported.isPublic    = false
-        EbonBuildsDB.builds[buildId] = imported
-        Log("Build " .. buildId .. " imported as new (author: " .. (imported.author or "?") .. ")")
+        imported.id = buildId
+        EbonBuildsDB.remoteBuilds[buildId] = imported
+        Log("Build " .. buildId .. " stored in remote (author: " .. (imported.author or "?") .. ")")
     end
 
     if EbonBuilds.PublicBuildsView and EbonBuilds.PublicBuildsView.RefreshIfMounted then
@@ -170,7 +227,7 @@ local function SendNextBatch(requester)
         -- All batches done, send END
         local endPayload = string.format("END|%s|%d", UnitName("player"), pb.sent)
         Enqueue(requester, endPayload)
-        Log(string.format("All batches sent to %s (%d builds total)", requester, pb.sent))
+        VerboseLog(string.format("All batches sent to %s (%d builds total)", requester, pb.sent))
         pendingBatches[requester] = nil
         return
     end
@@ -180,7 +237,7 @@ local function SendNextBatch(requester)
     for i = start, finish do
         local b = pb.builds[i]
         parts[#parts + 1] = b.id
-        parts[#parts + 1] = tostring(IsoToEpoch(b.lastModified))
+        parts[#parts + 1] = tostring(DateToEpoch(b.lastModified))
     end
     Enqueue(requester, table.concat(parts, "|"))
 end
@@ -213,7 +270,7 @@ end
 ------------------------------------------------------------------------
 
 local function HandleRequest(requester, lastDate)
-    if requester == UnitName("player") then return end
+    if not requester or requester == "" or requester == UnitName("player") then return end
 
     Log("Sync request from " .. requester .. " (lastSyncDate=" .. lastDate .. ")")
 
@@ -221,38 +278,45 @@ local function HandleRequest(requester, lastDate)
     EbonBuildsDB.syncPeers[requester] = true
 
     local allPublic = EbonBuilds.Build.ListPublic()
+    VerboseLog("HandleRequest: " .. #allPublic .. " public builds total")
     if #allPublic == 0 then
-        Log("No public builds to send, replying END to " .. requester)
+        VerboseLog("No public builds to send, replying END to " .. requester)
         local endPayload = string.format("END|%s|0", UnitName("player"))
         Enqueue(requester, endPayload)
         return
     end
 
-    local cutoff = SixtyDaysAgo()
+    local cutoffEpoch = IsoToEpoch(SixtyDaysAgo())
+    local lastDateEpoch = IsoToEpoch(lastDate)
     local eligible = {}
     for _, build in ipairs(allPublic) do
         if build.author ~= requester then
             if VALIDATION_REQUIRED and not build.validated then
-                -- skip non-validated builds when validation is required
+                VerboseLog("  build " .. (build.title or "?") .. " skipped: not validated")
             else
-                local mod = build.lastModified or ""
+                local modEpoch = DateToEpoch(build.lastModified)
                 if lastDate == "0" then
-                    if mod >= cutoff then eligible[#eligible + 1] = build end
+                    if modEpoch >= cutoffEpoch then eligible[#eligible + 1] = build
+                    else VerboseLog("  build " .. (build.title or "?") .. " skipped: too old (" .. (build.lastModified or "?") .. ")") end
                 else
-                    if mod > lastDate then eligible[#eligible + 1] = build end
+                    if modEpoch > lastDateEpoch then eligible[#eligible + 1] = build
+                    else VerboseLog("  build " .. (build.title or "?") .. " skipped: not newer than last sync") end
                 end
             end
+        else
+            VerboseLog("  build " .. (build.title or "?") .. " skipped: authored by requester")
         end
     end
 
+    VerboseLog("HandleRequest: " .. #eligible .. " eligible after filtering")
     if #eligible == 0 then
-        Log("No eligible builds for " .. requester .. ", replying END")
+        VerboseLog("No eligible builds for " .. requester .. ", replying END")
         local endPayload = string.format("END|%s|0", UnitName("player"))
         Enqueue(requester, endPayload)
         return
     end
 
-    Log(string.format("Prepared %d builds for %s in %d batch(es)",
+    VerboseLog(string.format("Prepared %d builds for %s in %d batch(es)",
         #eligible, requester, math.ceil(#eligible / BATCH_SIZE)))
 
     pendingBatches[requester] = {
@@ -269,12 +333,25 @@ end
 -- Channel message handler (REQ via custom chat channel)
 ------------------------------------------------------------------------
 
-local function HandleChannelMessage(msg, sender, channelName)
-    if channelName ~= SYNC_CHANNEL then return end
-    local code, requester, lastDate = msg:match("^(REQ)|([^|]+)|(.+)$")
-    if not code then return end
+local function HandleChannelMessage(msg, sender, _, channelName, _, _, channelNumber)
+    if not IsSyncChannelName(channelName) then return end
+
+    -- Learn the channel index from incoming messages (arg7)
+    if channelNumber and type(channelNumber) == "number" and channelNumber > 0 then
+        if not syncChannelIndex or syncChannelIndex ~= channelNumber then
+            syncChannelIndex = channelNumber
+            VerboseLog("Learned sync channel index from incoming message: " .. channelNumber)
+        end
+    end
+
+    -- Decode escaped pipes: SendChatMessage escapes | as ||, WoW may not unescape them
+    local decoded = msg:gsub("||", "|")
+    local parts = {strsplit("|", decoded)}
+    local code = parts[1]
+    if code ~= "REQ" then return end
     Log("REQ received via channel from " .. (sender or "?"))
-    HandleRequest(requester, lastDate)
+    local ok, err = pcall(HandleRequest, parts[2], parts[3])
+    if not ok then Log("HandleRequest error: " .. tostring(err)) end
 end
 
 ------------------------------------------------------------------------
@@ -282,14 +359,15 @@ end
 ------------------------------------------------------------------------
 
 local function HandleAddonREQ(payload, sender)
-    local code, requester, lastDate = payload:match("^(REQ)|([^|]+)|(.+)$")
-    if not code then return end
-    HandleRequest(requester, lastDate)
+    local parts = {strsplit("|", payload)}
+    if parts[1] ~= "REQ" then return end
+    HandleRequest(parts[2], parts[3])
 end
 
 local function HandleChunk(payload, sender)
-    local code, snd, buildId, idxTotal, data = payload:match("^(BLD)|([^|]+)|([^|]+)|([^|]+)|(.+)$")
-    if not code then return end
+    local parts = {strsplit("|", payload)}
+    if parts[1] ~= "BLD" or #parts < 5 then return end
+    local snd, buildId, idxTotal, data = parts[2], parts[3], parts[4], parts[5]
 
     local idx, total = idxTotal:match("^(%d+)/(%d+)$")
     if not idx then return end
@@ -311,7 +389,7 @@ local function HandleChunk(payload, sender)
     if rec.got == rec.total then
         local assembled = table.concat(rec.parts, "", 1, rec.total)
         inflight[key] = nil
-        Log(string.format("Build %s from %s fully received (%d chunks, %d bytes)",
+        VerboseLog(string.format("Build %s from %s fully received (%d chunks, %d bytes)",
             buildId, snd, total, #assembled))
         local ok, err = pcall(AssembleBuild, snd, buildId, assembled)
         if not ok then
@@ -324,30 +402,38 @@ end
 
 local function HandleListBatch(payload, sender)
     -- payload: "LST|sender|batch/total|uuid1|epoch1|uuid2|epoch2|..."
-    local parts = {}
-    for part in payload:gmatch("[^|]+") do parts[#parts + 1] = part end
+    local parts = {strsplit("|", payload)}
     if #parts < 4 then return end
 
     local wanted = {}
     for i = 4, #parts, 2 do
         local uuid = parts[i]
-        local remoteEpoch = tonumber(parts[i + 1]) or 0
+        local offerEpoch = tonumber(parts[i + 1]) or 0
         if uuid and uuid ~= "" then
+            local needUpdate = false
             local ownBuild = EbonBuildsDB.builds[uuid]
             if ownBuild then
-                local localEpoch = IsoToEpoch(ownBuild.lastModified)
-                if remoteEpoch > localEpoch then
-                    wanted[#wanted + 1] = uuid
-                end
+                local localEpoch = DateToEpoch(ownBuild.lastModified)
+                needUpdate = offerEpoch > localEpoch
             else
+                -- Already imported as local copy?
                 local localCopy = nil
                 for _, b in pairs(EbonBuildsDB.builds) do
                     if b.importedFrom == uuid then localCopy = b; break end
                 end
-                local localEpoch = localCopy and IsoToEpoch(localCopy._importedAt) or 0
-                if remoteEpoch > localEpoch then
-                    wanted[#wanted + 1] = uuid
+                local localEpoch = localCopy and DateToEpoch(localCopy._importedAt) or 0
+                if offerEpoch > localEpoch then
+                    needUpdate = true
                 end
+                -- Already received via another responder?
+                if not needUpdate then
+                    local rb = (EbonBuildsDB.remoteBuilds or {})[uuid]
+                    local rbEpoch = rb and DateToEpoch(rb.lastModified) or 0
+                    needUpdate = offerEpoch > rbEpoch
+                end
+            end
+            if needUpdate then
+                wanted[#wanted + 1] = uuid
             end
         end
     end
@@ -366,13 +452,11 @@ end
 
 local function HandleWant(payload, sender)
     -- payload: "WNT|requester|uuid1|uuid2|..."
-    local code, requester, uuids = payload:match("^(WNT)|([^|]+)|(.+)$")
-    if not code then return end
+    local parts = {strsplit("|", payload)}
+    if parts[1] ~= "WNT" then return end
     local wantedUuids = {}
-    if uuids then
-        for uuid in uuids:gmatch("[^|]+") do
-            wantedUuids[uuid] = true
-        end
+    for i = 3, #parts do
+        wantedUuids[parts[i]] = true
     end
     SendBatchBuilds(sender, wantedUuids)
 end
@@ -382,8 +466,9 @@ local function HandleSkip(payload, sender)
 end
 
 local function HandleEnd(payload, sender)
-    local code, snd, count = payload:match("^(END)|([^|]+)|(.+)$")
-    if not code then return end
+    local parts = {strsplit("|", payload)}
+    if parts[1] ~= "END" then return end
+    local snd, count = parts[2], parts[3]
 
     EbonBuildsDB.lastSyncDate = SortableNow()
 
@@ -393,10 +478,6 @@ local function HandleEnd(payload, sender)
             "|cff19ff19EbonBuilds|r: Received %d build(s) from %s.", c, snd))
     end
 
-    -- Refresh left panel when a responder finishes
-    if EbonBuilds.BuildList and EbonBuilds.BuildList.Refresh then
-        EbonBuilds.BuildList.Refresh()
-    end
     if EbonBuilds.PublicBuildsView and EbonBuilds.PublicBuildsView.RefreshIfMounted then
         EbonBuilds.PublicBuildsView.RefreshIfMounted()
     end
@@ -430,7 +511,20 @@ end
 -- Public API
 ------------------------------------------------------------------------
 
+function EbonBuilds.Sync.GetCooldownRemaining()
+    local elapsed = Now() - lastRequestTime
+    if elapsed >= REQ_COOLDOWN then return 0 end
+    return math.ceil(REQ_COOLDOWN - elapsed)
+end
+
 function EbonBuilds.Sync.RequestSync()
+    local remaining = EbonBuilds.Sync.GetCooldownRemaining()
+    if remaining > 0 then
+        Log("Sync on cooldown, wait " .. remaining .. "s before requesting again")
+        return
+    end
+    lastRequestTime = Now()
+
     local me       = UnitName("player")
     local lastDate = EbonBuildsDB.lastSyncDate or "0"
     local payload  = string.format("REQ|%s|%s", me, lastDate)
@@ -441,14 +535,23 @@ function EbonBuilds.Sync.RequestSync()
         Log("Requesting sync (builds newer than " .. lastDate .. ")...")
     end
 
-    -- Broadcast via hidden chat channel (primary discovery path)
+    -- 1. Broadcast via hidden chat channel (all addon users on the realm)
     RefreshChannel()
-    if syncChannelIndex and GetChannelName(syncChannelIndex) == SYNC_CHANNEL then
-        SendChatMessage(payload, "CHANNEL", nil, syncChannelIndex)
-        Log("REQ broadcast on hidden channel " .. SYNC_CHANNEL)
+    -- Escape | as || for SendChatMessage (avoids "Invalid escape code");
+    -- receiver will decode || back to | before parsing.
+    local escapedPayload = payload:gsub("|", "||")
+    channelRetries.remaining = 5
+    channelRetries.payload = escapedPayload
+    channelRetries.nextTime = 0  -- fire immediately on next OnUpdate
+
+    -- 2. Guild broadcast via SendAddonMessage (reliable, but guild-only)
+    local guildName = GetGuildInfo("player")
+    if guildName then
+        SendAddonMessage(PREFIX, payload, "GUILD")
+        VerboseLog("REQ also broadcast via GUILD")
     end
 
-    -- Fallback: whisper known peers (redundancy for cross-realm / channel issues)
+    -- 3. Whisper known peers (cross-realm / cross-guild fallback)
     EbonBuildsDB.syncPeers = EbonBuildsDB.syncPeers or {}
     local peerCount = 0
     for peer in pairs(EbonBuildsDB.syncPeers) do
@@ -458,7 +561,7 @@ function EbonBuilds.Sync.RequestSync()
         end
     end
     if peerCount > 0 then
-        Log("REQ also whispered to " .. peerCount .. " known peer(s)")
+        VerboseLog("REQ whispered to " .. peerCount .. " known peer(s)")
     end
 end
 
@@ -471,31 +574,41 @@ function EbonBuilds.Sync.Init()
         if event == "CHAT_MSG_ADDON" then
             DispatchAddon(...)
         elseif event == "CHAT_MSG_CHANNEL" then
-            local msg, sender, _, _, _, _, _, channelName = ...
-            HandleChannelMessage(msg, sender, channelName)
+            HandleChannelMessage(...)
         elseif event == "PLAYER_LEVEL_UP" then
             local newLevel = ...
             if newLevel == 80 then
                 local build = EbonBuilds.Build.GetActive()
                 if build and not build.validated then
                     build.validated = true
-                    Log("Build \"" .. (build.title or "?") .. "\" validated (reached level 80)")
+                    VerboseLog("Build \"" .. (build.title or "?") .. "\" validated (reached level 80)")
                 end
             end
         end
     end)
     syncFrame:SetScript("OnUpdate", function()
-        if #sendQueue > 0 and Now() >= nextSendTime then
+        local now = Now()
+        -- Channel retry loop
+        if channelRetries.remaining > 0 and now >= channelRetries.nextTime then
+            channelRetries.remaining = channelRetries.remaining - 1
+            local ok = pcall(SendChatMessage, channelRetries.payload, "CHANNEL", nil, 1)
+            Log("REQ attempt " .. (5 - channelRetries.remaining) .. "/5: " .. (ok and "sent" or tostring("err")))
+            if ok or channelRetries.remaining == 0 then
+                channelRetries.remaining = 0
+            else
+                channelRetries.nextTime = now + 0.1
+            end
+        end
+        -- Send queue (rate-limited)
+        if #sendQueue > 0 and now >= nextSendTime then
             local entry = sendQueue[1]
-            SendAddonMessage(PREFIX, entry.payload, "WHISPER", entry.target)
             table.remove(sendQueue, 1)
-            nextSendTime = Now() + SEND_DELAY
+            if entry.target and entry.target ~= "" and entry.payload then
+                SendAddonMessage(PREFIX, entry.payload, "WHISPER", entry.target)
+            end
+            nextSendTime = now + SEND_DELAY
         end
     end)
-
-    if RegisterAddonMessagePrefix then
-        RegisterAddonMessagePrefix(PREFIX)
-    end
 
     -- Join and hide the sync channel
     syncChannelIndex = FindOrJoinChannel()
@@ -503,4 +616,45 @@ function EbonBuilds.Sync.Init()
 
     EbonBuildsDB.lastSyncDate = EbonBuildsDB.lastSyncDate or nil
     EbonBuildsDB.syncPeers    = EbonBuildsDB.syncPeers    or {}
+
+    -- Purge remote builds from older addon versions (only unimported builds)
+    local storedVersion = EbonBuildsDB.syncVersion or 0
+    if storedVersion < SYNC_VERSION then
+        if EbonBuildsDB.remoteBuilds and next(EbonBuildsDB.remoteBuilds) then
+            EbonBuildsDB.remoteBuilds = {}
+            Log("Sync version bumped to " .. SYNC_VERSION .. " — remote builds purged.")
+        end
+        EbonBuildsDB.syncVersion = SYNC_VERSION
+    end
+end
+
+SLASH_EBBSYNC1 = "/ebbsync"
+SlashCmdList["EBBSYNC"] = function(cmd)
+    cmd = strtrim(cmd or "")
+    if cmd == "join" then
+        Log("To enable sync discovery, type: /join " .. SYNC_CHANNEL)
+        Log("After joining, reload with /reload or click Reload on Public Builds.")
+    elseif cmd == "status" then
+        RefreshChannel()
+        if syncChannelIndex and syncChannelIndex > 0 then
+            local name = GetChannelName(syncChannelIndex)
+            Log("Sync channel: index=" .. syncChannelIndex .. " name=" .. tostring(name))
+        else
+            Log("Sync channel not joined. Type /ebbsync join for help.")
+        end
+    elseif cmd == "reset" then
+        lastRequestTime = 0
+        EbonBuildsDB.lastSyncDate = nil
+        EbonBuildsDB.remoteBuilds = {}
+        Log("Sync cooldown and lastSyncDate reset. Remote builds cleared.")
+    elseif cmd == "verbose" then
+        VERBOSE_LOG = not VERBOSE_LOG
+        Log("Verbose logging " .. (VERBOSE_LOG and "enabled" or "disabled") .. ".")
+    else
+        Log("EbonBuilds Sync commands:")
+        Log("  /ebbsync join    - Show how to join the sync channel")
+        Log("  /ebbsync status  - Show current sync channel status")
+        Log("  /ebbsync reset   - Reset sync cooldown timer")
+        Log("  /ebbsync verbose - Toggle verbose logging")
+    end
 end

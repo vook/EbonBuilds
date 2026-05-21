@@ -2,9 +2,7 @@
 
 A **build-based echo automation addon** for **[ProjectEbonhold](https://github.com/vook/EbonBuilds)**, a World of Warcraft 3.3.5a (Wrath of the Lich King) roguelite server.
 
-EbonBuilds lets you create *builds* — class-specific profiles with weighted echo preferences, scoring rules, and automation thresholds. When echoes are offered during a run, the automation engine evaluates every choice against your active build and executes the optimal action automatically.
-
-**Repository:** [github.com/powerfulqa/EbonClearance](https://github.com/powerfulqa/EbonClearance)
+The addon lets you create *builds* — class-specific profiles that tell the automation engine exactly how to handle every echo choice during a run. The name EbonBuilds comes from the core idea behind the project: making it easy for players to share builds with each other. Even though public build sharing was the last feature implemented, it was always the goal.
 
 ---
 
@@ -16,13 +14,17 @@ Click the **minimap button** (book icon) or type `/ebb` to toggle the main windo
 
 ### Creating a Build
 
-1. Click **+ New Build** in the left panel.
-2. Choose your **class** and **specialization**.
-3. Give it a **title** and optionally a **description**.
-4. Switch to the **Echoes** tab and assign **weights** to echoes you want.
-5. Switch to the **Bonus** tab to configure scoring modifiers.
-6. Switch to the **Automation** tab to set thresholds and protection rules.
-7. Click **Save**.
+Click **+ New Build** in the left panel to open the editor. The editor is split into four tabs:
+
+**Overview** — Set your **class**, **specialization**, **locked echoes**, and **description**. Locked echoes are the ones you want to lock in your inventory during a run; they have the highest selection priority in the automation pipeline. The description field is your space to document what the build needs: recommended items, affixes, rotation priorities, glyphs — anything another player would need to know.
+
+**Echoes** — Fine-tune your build echo by echo. Assign a weight to each echo and see its calculated score across all five quality tiers (Common through Legendary). The higher the weight, the more the automation engine favors that echo.
+
+**Bonus** — Apply batch scoring modifiers based on echo characteristics like quality tier and family. These bonuses layer on top of individual weights. Each modifier has two modes: **additive** (the default) adds the bonus value directly to the echo's base score — an echo with 100 score and a +20 rarity bonus becomes 120. **Multiplicative** multiplies the base weight by the bonus: an echo with 100 base weight and a 0.2 multiplier gets 100 + 20 = 120. When the base weight is zero, multiplicative bonuses contribute nothing since only the base is multiplied; additive bonuses from other sources are ignored in the multiplication. There is also a **novelty** bonus, designed specifically for the Adaptive Power echo, which rewards unique echoes. If an echo is not already on your picked list, the novelty value is added to its total score — so an echo with 100 base score and 50 novelty will show 150 the first time it appears.
+
+**Automation** — Configure the thresholds that control how the addon reacts when echoes are offered. Set up family banish protection (echoes belonging to protected families are never banished, even if manually added to the ban list), a ban list of echoes that should never be picked, and the core automation thresholds. All thresholds use **peak** as their reference point — peak is the highest possible echo score for your class after all calculations except novelty. Auto-reroll triggers when the sum of all offered echo scores falls below a configurable percentage of peak (range: 50%–300%). Auto-banish removes echoes scoring below a percentage of peak. Auto-freeze activates when two or more echoes in the same pool score above the threshold — the lower-scored one is frozen and the highest is selected. Frozen echoes receive a score penalty for the next round, reducing their priority until they are eventually picked.
+
+When you are done configuring, click **Save**. You can mark the build as **Public** if you want it to appear in the public builds browser for other players. However, to prevent a flood of untested builds, only *validated* builds are shared — a build becomes validated when its creator reaches level 80 with it after starting from level 1.
 
 ### Importing a Build
 
@@ -34,114 +36,59 @@ While editing a build, click **Export** (bottom-left corner) to generate a base6
 
 ---
 
-## Features
+## Automation Pipeline
 
-### Build Management
-- Create, edit, and delete builds
-- Class-colored cards in the build list with class icon, spec icon, and locked echoes
-- Per-build echo weights, scoring settings, and automation thresholds
-- Toggle automation on/off per build from the overview
+When echoes are offered during a run, the automation engine evaluates every choice against your active build. It follows a strict priority pipeline with a short delay to ensure server data is ready:
 
-### Echo Table & Filters
-- Full echo list sourced from ProjectEbonhold's PerkDatabase
-- Class-filtered: only shows echoes available to your current class
-- Quality-tier scores displayed per echo (Common through Legendary)
-- Icon tooltips with resolved spell descriptions (via `utils.GetSpellDescription`)
-- Search filter by echo name
-- Quality dropdown filter
-- Family multi-select dropdown filter (Tank, Survivability, Healer, Caster DPS, Melee DPS, Ranged DPS, No family)
+1. **Locked Echo pre-check** — if an offered echo matches one of your locked echoes, it is selected immediately.
+2. **Banish** — echoes scoring below the auto-banish threshold are banished, lowest score first. Ban-list echoes take priority. Echoes whose families match the banish protection whitelist are skipped.
+3. **Reroll** — if the sum of all offered echo scores falls below the auto-reroll threshold, a reroll is requested.
+4. **Freeze** — if at least two offered echoes score above the auto-freeze threshold, the lower-scored one is frozen and the highest is selected.
+5. **Select** — falls back to picking the highest-scored non-banned echo.
 
-### Scoring System
-- **Base weight**: assign a numerical weight to each echo (0–999999)
-- **Quality bonuses**: per-tier additive or multiplicative bonuses
-- **Family bonuses**: per-family additive or multiplicative bonuses (Tank, Survivability, Healer, Caster, Melee, Ranged, No family)
-- **Novelty bonus**: additive or multiplicative bonus applied on top
-- **Peak score**: best possible echo score for the current class (used for threshold scaling; excludes novelty)
-
-### Automation Engine
-The automation engine runs every time echoes are offered. It follows a strict priority pipeline with a 2-second evaluation delay to ensure server data is ready:
-
-1. **Locked Echo pre-check**: if an offered echo matches a locked echo slot, it is selected immediately.
-2. **Banish**: banishes echoes below the auto-banish threshold (lowest score first). Ban-list echoes take priority. Echoes with families matching the banish protection whitelist are skipped.
-3. **Reroll**: if the sum of offered echo scores is below the auto-reroll threshold, a reroll is requested.
-4. **Freeze**: if at least two offered echoes score above the auto-freeze threshold, the lower-scored ones are frozen and the highest is selected after the evaluation delay. A configurable freeze penalty is applied to frozen echoes.
-5. **Select**: falls back to selecting the highest-scored non-banned echo (or a random one if all are banned and ban-all mode is set to random).
-
-Toast notifications appear after each automated action, showing the three offered echoes, the target echo highlighted, and remaining charges (banish, reroll, freeze).
-
-### Automation Settings
-- **Auto-banish %**: banish echoes scoring below this percentage of peak
-- **Auto-reroll %**: reroll when the best offered echo is below this percentage of peak
-- **Auto-freeze %**: freeze echoes scoring above this percentage of peak
-- **Freeze penalty %**: score reduction applied to frozen echoes
-- **Banish family protection**: per-family whitelist — any echo with at least one protected family is never banished nor selected
-- **Echo ban list**: manually ban specific echoes (right-click to remove)
-- **Ban-all mode**: when all offered echoes are banned, pick the highest score or a random one
-
-### Locked Echoes
-- Configure up to 4 locked echoes per build
-- Echo picker with quality filtering and ban-list awareness
-- Locked echoes are auto-selected when offered
-- Displayed in the build list, build editor, and build overview
-
-### Build Overview
-Three-tab dashboard for the active build:
-- **Overview**: class, spec, author, last modified, description, locked echoes, automation toggle
-- **Stats**: echoes seen, runs completed, picks, rerolls/banishes/freezes used, quality distribution, most picked/banned echoes, missing echoes with drop sources sorted by score
-- **Logbook**: full session history embedded in the overview
-
-### Session History
-- Automatic session tracking: a session begins at level 1 and ends when the player dies and resets to level 1
-- Per-session log of every automation action with echo names, scores, target highlight, and remaining charges
-- Session cards showing character name, class, build title, level range, soul ashes, and duration
-- Live-refreshing log view while the window is open
-- Export session to a text file
-- Delete individual sessions or log entries
-
-### Export / Import
-- Export builds to base64-encoded JSON (echoes without weight are excluded to keep payloads small)
-- Import builds from base64 strings pasted into the import dialog
-- Payload includes author, lastModified, isPublic, and validated fields for sync compatibility
-- All settings, weights, locked echoes, and automation configuration are preserved
-
-### Public Builds Browser
-- Dedicated view listing all public builds shared by other players on the realm
-- Class and specialization dropdown filters with "All Classes" / "All Specs" options
-- Per-build smart buttons: **Import** (new), **Update** (incoming version is newer), or **Loaded** (already imported and up-to-date)
-- Import tracking via `importedFrom` and `_importedAt` prevents duplicate entries
-- Filtering logic hides builds already owned by UUID or imported with an up-to-date timestamp
-
-### Peer-to-Peer Sync
-- Hidden chat channel (`EbonBuildsSync`) for automatic peer discovery
-- Known-peers fallback via WHISPER for cross-realm or guildless scenarios
-- Batch protocol: `LST` (list 3 UUIDs + epochs) → `WNT`/`SKP` (want/skip) → `BLD` (chunked build data) → `END`
-- 180-byte chunks with inflight reassembly keyed by `sender:buildId`
-- 50 ms rate limiting on all outgoing SendAddonMessage calls
-- Epoch-based date comparison in batch listings for compact payloads
-- ISQ-to-Unix conversion (`IsoToEpoch`) for lexicographic → numeric date checks
-- 15-second timeouts on inflight chunks and pending batches (cleanup on disconnect)
-- `pcall`-wrapped assembly prevents corrupt payloads from breaking the event handler
-- Incremental UI updates: PublicBuildsView refreshes per received build, BuildList at END
-- Build validation gate: `PLAYER_LEVEL_UP` marks the active build as `validated` at level 80; gated by `VALIDATION_REQUIRED` toggle (disabled by default)
-
-### Build Identity
-- **ObjectId** 24-character hex identifiers (`693d8a00a3f1b29c7e4d0011`) replacing `timestamp-random-playername` UUIDs
-- Automatic migration of old-format UUIDs on addon load (`MigrateIds`)
-- Checksum-based change detection: `lastModified` only updates when build data actually differs
-- `Build.UpdateFromPublic` merges remote build data into a local copy, preserving UUID and stats
-
-### Toast Notifications
-- Action summaries with inline echo names, scores, and target highlighting
-- Remaining charges display (banish, reroll, freeze)
-- Auto-dismiss after 3 seconds, pause on mouseover, click to dismiss
+A toast notification appears after each automated action showing the three offered echoes, the target highlighted, and your remaining charges.
 
 ---
 
-## Planned Features
+## Build List & Overview
 
-- **Configurable evaluation delay**: expose the 2-second automation delay as a user setting
-- **Build versioning and change history**: track and review build changes over time
-- **Multi-build comparison**: compare scoring differences between builds side-by-side
+The **left panel** lists all your builds — created or imported. Click any build to load it; the active build is the one driving automation. You can toggle automation on or off per build directly from the overview.
+
+Clicking a build opens the **Overview** tab with class, spec, author, last modified, locked echoes, and the automation toggle. Three additional sub-tabs are available:
+
+**Stats** — echoes seen, runs completed, picks, rerolls/banishes/freezes used, quality distribution, and the most picked and banned echoes. (Some counters are not yet fully wired and will be updated in a future version.)
+
+**Missing** — all echoes your build does not yet have, sorted by score. Echoes at the top have the highest acquisition priority.
+
+**Logbook** — the full session history embedded in the overview. A session starts at level 1 and ends when your character dies and resets. Every automation action is recorded with echo names, scores, target highlights, and remaining charges. You can export, delete individual entries, or clear all logs.
+
+---
+
+## Public Builds & Sync
+
+The **Public Builds** screen (accessible from the button above the build list) shows builds shared by other players. You can filter by class and specialization. Each build card shows an **Import** button for new builds, an **Update** button when a newer version is available, or a **Loaded** label when you are already up to date.
+
+> **Important:** Sync is peer-to-peer — there is no central server. At least one player must have public builds available and be online at the same time as you for any builds to appear. Until a few players act as seeds by sharing their builds, the list will be empty. Once builds start circulating and players import them, the network becomes self-sustaining. If you see an empty list, it simply means no seed player is currently online — try again later or ask a friend to share their builds.
+
+Sync uses a hidden in-game channel to discover peers. Due to limitations in the addon communication API, it only runs when you click the **Reload** button on the Public Builds screen. Only builds updated within the last 60 days are shown, and the addon always fetches the most recent version of each build. Loading may feel slightly slow — the addon is working within tight constraints and the protocol had to be quite creative to function reliably.
+
+> **Early release:** The sync system is not yet final. Bugs may occur. If you encounter issues, please report them so they can be fixed.
+
+**Validation requirement:** only builds that have reached level 80 with their creator are shared. This prevents untested or incomplete builds from flooding the public list.
+
+When you edit a build you imported from another player, the build becomes yours: it gets a new identity, your name as the author, and must be re-validated (level 1 to 80) before it can be shared publicly again. The original author's name is kept in the build's lineage so you always know who you forked from.
+
+---
+
+## Commands
+
+| Command | Description |
+|---|---|
+| `/ebb` | Toggle the EbonBuilds main window |
+| `/ebbsync join` | Show how to join the sync channel |
+| `/ebbsync status` | Show sync channel status |
+| `/ebbsync reset` | Reset sync cooldown and lastSyncDate; clears remote builds |
+| `/ebbsync verbose` | Toggle verbose logging for sync diagnostics |
 
 ---
 
@@ -151,20 +98,19 @@ Three-tab dashboard for the active build:
 
 ---
 
-## Commands
-
-| Command | Alias | Description |
-|---|---|---|
-| `/ebb` | `/ebonbuilds` | Toggle the EbonBuilds main window |
-
----
-
 ## Saved Variables
 
 `EbonBuildsDB` — persisted per-account:
-- `builds` — all saved builds
-- `activeBuildId` — currently active build
-- `sessions` — session history logs
-- `currentSessionIndex` — active session tracking
-- `pendingWeights` — weights entered before the first build is saved
-- `minimapAngle` — minimap button position
+
+| Field | Description |
+|---|---|
+| `builds` | All locally-owned builds (created + imported), keyed by ObjectId |
+| `activeBuildId` | Currently active build driving automation |
+| `sessions` | Session history logs |
+| `pendingWeights` | Staging area for echo weights during editing |
+| `_isEditingBuild` | Flag indicating edit/create mode is active |
+| `remoteBuilds` | Builds received via sync, not yet imported — keyed by source ObjectId |
+| `lastSyncDate` | ISO timestamp of last successful sync |
+| `syncPeers` | Known responder names for fallback discovery |
+| `syncVersion` | Tracks the last `SYNC_VERSION` — bumping it purges `remoteBuilds` |
+| `minimapAngle` | Minimap button position |

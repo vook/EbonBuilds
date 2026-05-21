@@ -299,6 +299,10 @@ local function ImportBuild(build)
     end
     newBuild._checksum = EbonBuilds.Build.Checksum(newBuild)
     EbonBuilds.Build.EnsureSettings(newBuild)
+    -- Remove from remote builds since we now have a local copy
+    if EbonBuildsDB.remoteBuilds then
+        EbonBuildsDB.remoteBuilds[build.id] = nil
+    end
     EbonBuilds.Build.SetActive(newBuild.id)
     if EbonBuilds.BuildList and EbonBuilds.BuildList.Refresh then
         EbonBuilds.BuildList.Refresh()
@@ -560,6 +564,16 @@ local function BuildViewFrame(parent)
     refreshBtn:SetText("Reload")
     refreshBtn:SetScript("OnClick", function()
         EbonBuilds.Sync.RequestSync()
+    end)
+    refreshBtn:SetScript("OnUpdate", function()
+        local remaining = EbonBuilds.Sync.GetCooldownRemaining()
+        if remaining > 0 then
+            refreshBtn:Disable()
+            refreshBtn:SetText("Wait " .. remaining .. "s")
+        else
+            refreshBtn:Enable()
+            refreshBtn:SetText("Reload")
+        end
     end)
 
     -- Scroll area

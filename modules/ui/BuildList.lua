@@ -145,7 +145,7 @@ end
 local LOCKED_X_START = 32
 local LOCKED_STEP    = 28
 
-local function PopulateRow(row, index, build, activeId)
+local function PopulateRow(row, build, activeId, yOffset)
     local isActive = (build.id == activeId)
     local classToken = build.class
     local cc = CLASS_COLORS[classToken] or { 0.5, 0.5, 0.5 }
@@ -157,7 +157,7 @@ local function PopulateRow(row, index, build, activeId)
     row:ClearAllPoints()
     row:SetPoint("LEFT",  scrollChild, "LEFT",  0, 0)
     row:SetPoint("RIGHT", scrollChild, "RIGHT", 0, 0)
-    row:SetPoint("TOP",   scrollChild, "TOP",   0, -(index - 1) * (rowHeight + CARD_MARGIN))
+    row:SetPoint("TOP",   scrollChild, "TOP",   0, -yOffset)
 
     -- Stripe and background
     if isActive then
@@ -186,6 +186,13 @@ local function PopulateRow(row, index, build, activeId)
     local title = build.title or "Untitled"
     row._titleLabel:SetText(title)
     row._titleLabel:SetTextColor(cc[1], cc[2], cc[3], 1)
+    if twoLines then
+        row._titleLabel:SetWidth(TITLE_MAX_W)
+        row._titleLabel:SetHeight(28)
+    else
+        row._titleLabel:SetWidth(0)
+        row._titleLabel:SetHeight(0)
+    end
 
     -- Spec icon
     local specs = EbonBuilds.SpecData and EbonBuilds.SpecData[classToken]
@@ -243,18 +250,15 @@ end
 local function Render()
     local builds   = EbonBuilds.Build.List()
     local activeId = EbonBuildsDB.activeBuildId
+    local yOffset = 0
     for i = 1, #builds do
         if not rowPool[i] then rowPool[i] = CreateRow(scrollChild) end
-        PopulateRow(rowPool[i], i, builds[i], activeId)
+        PopulateRow(rowPool[i], builds[i], activeId, yOffset)
+        yOffset = yOffset + (NeedsTwoLines(builds[i].title) and ROW_DOUBLE or ROW_SINGLE) + CARD_MARGIN
     end
     for i = #builds + 1, #rowPool do rowPool[i]:Hide() end
 
-    local total = 0
-    for i = 1, #builds do
-        local h = NeedsTwoLines(builds[i].title) and ROW_DOUBLE or ROW_SINGLE
-        total = total + h + CARD_MARGIN
-    end
-    scrollChild:SetHeight(math.max(1, total))
+    scrollChild:SetHeight(math.max(1, yOffset))
 end
 
 EbonBuilds.BuildList.Refresh = Render

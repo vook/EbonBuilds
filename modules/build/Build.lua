@@ -239,8 +239,15 @@ end
 
 function EbonBuilds.Build.ListPublic()
     local out = {}
+    -- Local public builds
     for _, b in pairs(EbonBuildsDB.builds) do
         if b.isPublic then out[#out + 1] = b end
+    end
+    -- Remote builds (received via sync)
+    if EbonBuildsDB.remoteBuilds then
+        for _, b in pairs(EbonBuildsDB.remoteBuilds) do
+            out[#out + 1] = b
+        end
     end
     table.sort(out, function(a, b) return (a.lastModified or "") > (b.lastModified or "") end)
     return out
