@@ -29,6 +29,7 @@ local function OnAddonLoaded(addonName)
     EbonBuilds.MinimapButton.Init()
     EbonBuilds.MainWindow.Init()
     EbonBuilds.Automation.Init()
+    EbonBuilds.Sync.Init()
 end
 
 eventFrame:RegisterEvent("ADDON_LOADED")

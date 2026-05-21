@@ -19,8 +19,10 @@ modules/ui/EchoTable.lua
 modules/session/Session.lua
 modules/build/Scoring.lua
 modules/build/ExportImport.lua
+modules/sync/Sync.lua
 modules/ui/WeightsView.lua
 modules/ui/WelcomeView.lua
+modules/ui/PublicBuildsView.lua
 modules/ui/BonusView.lua
 modules/ui/SettingsView.lua
 modules/ui/BuildTabs.lua

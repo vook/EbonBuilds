@@ -42,6 +42,48 @@ end
 
 EbonBuilds.Build.EnsureSettings = EnsureSettings
 
+local function CloneTable(t)
+    if type(t) ~= "table" then return t end
+    local copy = {}
+    for k, v in pairs(t) do
+        copy[CloneTable(k)] = CloneTable(v)
+    end
+    return copy
+end
+
+function EbonBuilds.Build.CloneSettings(settings)
+    return CloneTable(settings)
+end
+
+function EbonBuilds.Build.Checksum(build)
+    local parts = {
+        build.title or "",
+        build.class or "",
+        tostring(build.spec or 1),
+        build.comments or "",
+    }
+    local le = build.lockedEchoes or {}
+    for i = 1, 4 do
+        parts[#parts + 1] = tostring(le[i] or "nil")
+    end
+    if build.echoWeights then
+        local names = {}
+        for name in pairs(build.echoWeights) do
+            if type(build.echoWeights[name]) == "number" and build.echoWeights[name] > 0 then
+                names[#names + 1] = name
+            end
+        end
+        table.sort(names)
+        for _, name in ipairs(names) do
+            parts[#parts + 1] = name .. "=" .. tostring(build.echoWeights[name])
+        end
+    end
+    parts[#parts + 1] = tostring(build.automationEnabled and 1 or 0)
+    local s = CloneTable(build.settings or DefaultSettings())
+    parts[#parts + 1] = EbonBuilds.ExportImport and EbonBuilds.ExportImport.JSONEncode and EbonBuilds.ExportImport.JSONEncode(s) or ""
+    return table.concat(parts, "|")
+end
+
 local function EnsureStats(build)
     build.stats = build.stats or {
         echoesSeen    = 0,
@@ -60,7 +102,10 @@ local function EnsureStats(build)
     build.stats.mostBanned   = build.stats.mostBanned   or {}
     if build.automationEnabled == nil then build.automationEnabled = true end
     if not build.author then build.author = "Unknown" end
-    if not build.lastModified then build.lastModified = date() end
+    if not build.lastModified then build.lastModified = date("%Y-%m-%d %H:%M:%S") end
+    if build.isPublic == nil then build.isPublic = false end
+    if build.validated == nil then build.validated = false end
+    if build.copiedFrom == nil then build.copiedFrom = nil end
 end
 
 local activeChangeCallbacks = {}
@@ -82,6 +127,15 @@ end
 function EbonBuilds.Build.NewId()
     local name = UnitName("player") or "unknown"
     return tostring(time()) .. "-" .. tostring(math.random(1, 1000000000)) .. "-" .. name
+end
+
+function EbonBuilds.Build.NewObjectId()
+    return string.format("%08x%04x%04x%04x%04x",
+        time(),
+        math.random(0, 65535),
+        math.random(0, 65535),
+        math.random(0, 65535),
+        math.random(0, 65535))
 end
 
 ------------------------------------------------------------------------
@@ -117,7 +171,7 @@ function EbonBuilds.Build.Migrate()
 
     local legacy = EbonBuildsDB.echoWeights
     if legacy and not next(EbonBuildsDB.builds) then
-        local id = EbonBuilds.Build.NewId()
+        local id = EbonBuilds.Build.NewObjectId()
         EbonBuildsDB.builds[id] = {
             id              = id,
             title           = "Migrated",
@@ -134,6 +188,40 @@ function EbonBuilds.Build.Migrate()
     EbonBuildsDB.echoWeights = nil
 
     for _, b in pairs(EbonBuildsDB.builds) do EnsureSettings(b); EnsureStats(b) end
+
+    EbonBuilds.Build.MigrateIds()
+end
+
+function EbonBuilds.Build.MigrateIds()
+    local oldIds = {}
+    for id, b in pairs(EbonBuildsDB.builds) do
+        if id:match("-") then oldIds[#oldIds + 1] = id end
+    end
+
+    if #oldIds == 0 then return end
+
+    local map = {}
+    for _, oldId in ipairs(oldIds) do
+        map[oldId] = EbonBuilds.Build.NewObjectId()
+    end
+
+    for _, oldId in ipairs(oldIds) do
+        local newId = map[oldId]
+        local build = EbonBuildsDB.builds[oldId]
+        build.id = newId
+        EbonBuildsDB.builds[newId] = build
+        EbonBuildsDB.builds[oldId] = nil
+    end
+
+    if EbonBuildsDB.activeBuildId and map[EbonBuildsDB.activeBuildId] then
+        EbonBuildsDB.activeBuildId = map[EbonBuildsDB.activeBuildId]
+    end
+
+    for _, build in pairs(EbonBuildsDB.builds) do
+        if build.importedFrom and map[build.importedFrom] then
+            build.importedFrom = map[build.importedFrom]
+        end
+    end
 end
 
 ------------------------------------------------------------------------
@@ -146,6 +234,22 @@ function EbonBuilds.Build.List()
         out[#out + 1] = b
     end
     table.sort(out, function(a, b) return (a.title or "") < (b.title or "") end)
+    return out
+end
+
+function EbonBuilds.Build.ListPublic()
+    local out = {}
+    -- Local public builds
+    for _, b in pairs(EbonBuildsDB.builds) do
+        if b.isPublic then out[#out + 1] = b end
+    end
+    -- Remote builds (received via sync)
+    if EbonBuildsDB.remoteBuilds then
+        for _, b in pairs(EbonBuildsDB.remoteBuilds) do
+            out[#out + 1] = b
+        end
+    end
+    table.sort(out, function(a, b) return (a.lastModified or "") > (b.lastModified or "") end)
     return out
 end
 
@@ -165,6 +269,10 @@ function EbonBuilds.Build.SetActive(id)
 end
 
 function EbonBuilds.Build.GetActiveWeights()
+    if EbonBuildsDB._isEditingBuild then
+        EbonBuildsDB.pendingWeights = EbonBuildsDB.pendingWeights or {}
+        return EbonBuildsDB.pendingWeights
+    end
     local build = EbonBuilds.Build.GetActive()
     if build then
         build.echoWeights = build.echoWeights or {}
@@ -174,8 +282,8 @@ function EbonBuilds.Build.GetActiveWeights()
     return EbonBuildsDB.pendingWeights
 end
 
-function EbonBuilds.Build.Create(data)
-    local id = EbonBuilds.Build.NewId()
+function EbonBuilds.Build.NewObject(data)
+    local id = EbonBuilds.Build.NewObjectId()
     local build = {
         id              = id,
         title           = data.title or "Untitled",
@@ -183,13 +291,16 @@ function EbonBuilds.Build.Create(data)
         spec            = data.spec or PlayerTopTalentTab(),
         comments        = data.comments or "",
         lockedEchoes = data.lockedEchoes or { nil, nil, nil, nil },
-        echoWeights     = EbonBuildsDB.pendingWeights or {},
+        echoWeights     = data.echoWeights or {},
         settings        = data.settings or DefaultSettings(),
         version         = 1,
-        author          = UnitName("player") or "Unknown",
-        lastModified    = date(),
-        automationEnabled = true,
-        stats           = {
+        author          = data.author or UnitName("player") or "Unknown",
+        lastModified    = data.lastModified or date("%Y-%m-%d %H:%M:%S"),
+        automationEnabled = (data.automationEnabled ~= nil) and data.automationEnabled or true,
+        isPublic         = data.isPublic or false,
+        validated         = data.validated or false,
+        copiedFrom        = data.copiedFrom or nil,
+        stats            = {
             echoesSeen    = 0,
             runsCompleted = 0,
             runsReset     = 0,
@@ -202,14 +313,53 @@ function EbonBuilds.Build.Create(data)
             mostBanned    = {},
         },
     }
-    EbonBuildsDB.pendingWeights = nil
-    EbonBuildsDB.builds[id] = build
+    build._checksum = EbonBuilds.Build.Checksum(build)
     return build
+end
+
+function EbonBuilds.Build.Create(data)
+    local build = EbonBuilds.Build.NewObject(data)
+    build.echoWeights = EbonBuildsDB.pendingWeights or build.echoWeights
+    EbonBuildsDB.pendingWeights = nil
+    EbonBuildsDB.builds[build.id] = build
+    return build
+end
+
+function EbonBuilds.Build.UpdateFromPublic(localBuild, publicBuild)
+    localBuild.title            = publicBuild.title            or localBuild.title
+    localBuild.class            = publicBuild.class            or localBuild.class
+    localBuild.spec             = publicBuild.spec             or localBuild.spec
+    localBuild.comments         = publicBuild.comments         or localBuild.comments
+    localBuild.lockedEchoes     = { nil, nil, nil, nil }
+    for i = 1, 4 do
+        localBuild.lockedEchoes[i] = (publicBuild.lockedEchoes and publicBuild.lockedEchoes[i]) or nil
+    end
+    if publicBuild.settings then
+        localBuild.settings = EbonBuilds.Build.CloneSettings(publicBuild.settings)
+    end
+    if publicBuild.automationEnabled ~= nil then
+        localBuild.automationEnabled = publicBuild.automationEnabled
+    end
+    if publicBuild.echoWeights and next(publicBuild.echoWeights) then
+        localBuild.echoWeights = {}
+        for name, weight in pairs(publicBuild.echoWeights) do
+            localBuild.echoWeights[name] = weight
+        end
+    end
+    if publicBuild.copiedFrom then
+        localBuild.copiedFrom = publicBuild.copiedFrom
+    end
+    localBuild._importedAt = publicBuild.lastModified
+    localBuild.lastModified = date("%Y-%m-%d %H:%M:%S")
+    localBuild.version = (localBuild.version or 1) + 1
+    localBuild._checksum = EbonBuilds.Build.Checksum(localBuild)
+    return localBuild
 end
 
 function EbonBuilds.Build.Save(id, data)
     local build = EbonBuildsDB.builds[id]
     if not build then return nil end
+    local oldChecksum = build._checksum
     local classChanged = data.class and data.class ~= build.class
     build.title           = data.title           or build.title
     build.class           = data.class           or build.class
@@ -217,9 +367,29 @@ function EbonBuilds.Build.Save(id, data)
     build.comments        = data.comments        or build.comments
     build.lockedEchoes = data.lockedEchoes or build.lockedEchoes
     if data.settings then build.settings = data.settings end
+    if data.echoWeights then build.echoWeights = data.echoWeights end
     if data.automationEnabled ~= nil then build.automationEnabled = data.automationEnabled end
+    if data.isPublic ~= nil then build.isPublic = data.isPublic end
     build.version         = (build.version or 1) + 1
-    build.lastModified    = date()
+    build._checksum       = EbonBuilds.Build.Checksum(build)
+    if build._checksum ~= oldChecksum then
+        build.lastModified = date("%Y-%m-%d %H:%M:%S")
+        local playerName = UnitName("player") or "Unknown"
+        if build.author and build.author ~= playerName then
+            build.copiedFrom = build.author
+            build.author = playerName
+            build.validated = false
+            build.importedFrom = nil
+            local newId = EbonBuilds.Build.NewObjectId()
+            build.id = newId
+            EbonBuildsDB.builds[newId] = build
+            EbonBuildsDB.builds[id] = nil
+            if EbonBuildsDB.activeBuildId == id then
+                EbonBuildsDB.activeBuildId = newId
+                Notify()
+            end
+        end
+    end
     if classChanged and EbonBuildsDB.activeBuildId == id then
         Notify()
     end

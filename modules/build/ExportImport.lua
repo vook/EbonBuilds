@@ -96,6 +96,8 @@ local function JSONEncode(value)
 	return "null"
 end
 
+EbonBuilds.ExportImport.JSONEncode = JSONEncode
+
 ------------------------------------------------------------------------
 -- Minimal JSON decoder
 ------------------------------------------------------------------------
@@ -186,7 +188,7 @@ local function ParseValue(s, pos)
 	end
 end
 
-local function JSONDecode(s)
+EbonBuilds.ExportImport.JSONDecode = function(s)
 	if not s or s == "" then return nil end
 	local val = ParseValue(s, 1)
 	return val
@@ -218,47 +220,61 @@ local function BuildExportData(build)
 		echoWeights = filteredWeights,
 		settings = build.settings,
 		automationEnabled = build.automationEnabled,
+		isPublic = build.isPublic or false,
+		validated = build.validated or false,
+		author = build.author,
+		lastModified = build.lastModified,
+		copiedFrom = build.copiedFrom or nil,
 	}
 end
 
 function EbonBuilds.ExportImport.ExportBuild(build)
 	if not build then return nil end
 	local data = BuildExportData(build)
-	local json = JSONEncode(data)
+	local json = EbonBuilds.ExportImport.JSONEncode(data)
 	return Base64Encode(json)
 end
 
-function EbonBuilds.ExportImport.ImportBuild(b64String)
+function EbonBuilds.ExportImport.DecodeBuild(b64String)
 	if not b64String or b64String == "" then return nil end
 	local json = Base64Decode(b64String)
 	if not json or json == "" then return nil end
-	local data = JSONDecode(json)
+	local data = EbonBuilds.ExportImport.JSONDecode(json)
 	if not data or type(data) ~= "table" then return nil end
 
-	-- Ensure lockedEchoes has exactly 4 slots
 	local locked = data.lockedEchoes or {}
 	for i = 1, 4 do locked[i] = locked[i] or nil end
 
-	local build = EbonBuilds.Build.Create({
-		title    = data.title    or "Imported Build",
-		class    = data.class    or EbonBuilds.Build.PlayerClassToken(),
-		spec     = data.spec     or 1,
-		comments = data.comments or "",
-		lockedEchoes = locked,
-		settings = data.settings or EbonBuilds.Build.DefaultSettings(),
-	})
-	build.automationEnabled = data.automationEnabled
+	local echoWeights = nil
 	if data.echoWeights and next(data.echoWeights) then
-		build.echoWeights = {}
+		echoWeights = {}
 		for name, weight in pairs(data.echoWeights) do
-			build.echoWeights[name] = weight
+			echoWeights[name] = weight
 		end
 	end
-	if data.automationEnabled ~= nil then
-		build.automationEnabled = data.automationEnabled
-	end
 
+	local build = EbonBuilds.Build.NewObject({
+		title       = data.title    or "Imported Build",
+		class       = data.class    or EbonBuilds.Build.PlayerClassToken(),
+		spec        = data.spec     or 1,
+		comments    = data.comments or "",
+		lockedEchoes = locked,
+		echoWeights = echoWeights,
+		settings    = data.settings or EbonBuilds.Build.DefaultSettings(),
+		automationEnabled = data.automationEnabled,
+		isPublic    = data.isPublic or false,
+		validated   = data.validated or false,
+		author      = data.author,
+		lastModified = data.lastModified,
+		copiedFrom  = data.copiedFrom or nil,
+	})
 	EbonBuilds.Build.EnsureSettings(build)
+	return build
+end
+
+function EbonBuilds.ExportImport.ImportBuild(b64String)
+	local build = EbonBuilds.ExportImport.DecodeBuild(b64String)
+	if not build then return nil end
 	EbonBuildsDB.builds[build.id] = build
 	EbonBuilds.Build.SetActive(build.id)
 	return build

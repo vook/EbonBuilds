@@ -1,7 +1,7 @@
 -- EbonBuilds: modules/ui/BuildOverview.lua
 -- Responsibility: build overview dashboard with tabs (Overview + Stats +
--- Logbook). Registered as "buildOverview" view. Shows build metadata,
--- locked echoes, automation toggle, and runtime statistics.
+-- Missing + Logbook). Registered as "buildOverview" view. Shows build metadata,
+-- locked echoes, automation toggle, runtime statistics, and missing echoes.
 
 EbonBuilds.BuildOverview = {}
 
@@ -31,7 +31,7 @@ local QUALITY_LABELS = {
 }
 
 local viewFrame
-local tab1, tab2, tab3
+local tab1, tab2, tab3, tab4
 local contentArea
 local state = { build = nil }
 
@@ -166,6 +166,16 @@ local function ComputeMissingEchoes(build)
         end
     end
 
+    -- Also mark echoes owned via granted perks (catches echoes without a
+    -- required tome, which aren't visible in the spellbook).
+    if ProjectEbonhold.PerkService.GetGrantedPerks then
+        local granted = ProjectEbonhold.PerkService.GetGrantedPerks()
+        for name in pairs(granted or {}) do
+            local norm = NormalizeEchoName(name)
+            if norm then ownedLower[norm] = true end
+        end
+    end
+
     -- Build locked echo name set for priority sorting
     local lockedLower = {}
     if build.lockedEchoes then
@@ -207,7 +217,8 @@ local function ComputeMissingEchoes(build)
         if not source and entry.data.groupId and ProjectEbonhold.PerkDropSourceByGroup then
             source = ProjectEbonhold.PerkDropSourceByGroup[entry.data.groupId]
         end
-        if source and not banList[entry.spellId] then
+        local needsTome = entry.data.requiredSpell and entry.data.requiredSpell > 0
+        if not banList[entry.spellId] and needsTome then
             -- Build scoring entry
             local scoringEntry = {
                 spellId = entry.spellId,
@@ -222,7 +233,7 @@ local function ComputeMissingEchoes(build)
                 spellId = entry.spellId,
                 name = entry.displayName,
                 quality = entry.data.quality or 0,
-                dropSource = source,
+                dropSource = source or "Unknown",
                 isLocked = lockedLower[key] or false,
                 score = score,
             }
@@ -272,9 +283,30 @@ local function BuildOverviewTab(parent)
     metaLabel:SetJustifyH("LEFT")
     outer._metaLabel = metaLabel
 
+    -- Public / Validated status (button frame for tooltip support)
+    local statusFrame = CreateFrame("Button", nil, outer)
+    statusFrame:SetPoint("TOPLEFT",     metaLabel, "BOTTOMLEFT", 0, -12)
+    statusFrame:SetPoint("RIGHT",       outer,     "RIGHT",      -10, 0)
+    statusFrame:SetHeight(16)
+    local statusLabel = statusFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    statusLabel:SetAllPoints(statusFrame)
+    statusLabel:SetJustifyH("LEFT")
+    statusFrame:SetScript("OnEnter", function(self)
+        local build = state.build
+        if not build or not build.isPublic then return end
+        GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+        GameTooltip:ClearLines()
+        GameTooltip:AddLine("Public Build", 1, 0.82, 0, 1)
+        GameTooltip:AddLine("Public builds require validation to appear in the browser.", 0.8, 0.8, 0.8, 1)
+        GameTooltip:AddLine("Level a character from 1 to 80 using this build to validate it.", 0.6, 0.6, 0.6, 1)
+        GameTooltip:Show()
+    end)
+    statusFrame:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    outer._statusLabel = statusLabel
+
     -- Locked echoes
     local lockedHeader = outer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    lockedHeader:SetPoint("TOPLEFT", metaLabel, "BOTTOMLEFT", 0, -18)
+    lockedHeader:SetPoint("TOPLEFT", statusLabel, "BOTTOMLEFT", 0, -14)
     lockedHeader:SetText("Locked Echoes:")
     outer._lockedHeader = lockedHeader
 
@@ -477,55 +509,39 @@ local function BuildStatsTab(parent)
         qy = qy - 18
     end
 
-    -- Bottom section: Missing Echoes (full width, 3 columns)
-    local missingHeader = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    missingHeader:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, -250)
-    missingHeader:SetText("Missing Echoes")
+    return valueLabels, qualityLabels
+end
 
-    local colNameHdr = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    colNameHdr:SetPoint("TOPLEFT", missingHeader, "BOTTOMLEFT", 4, -4)
-    colNameHdr:SetText("Name")
-    colNameHdr:SetWidth(180)
-    colNameHdr:SetJustifyH("LEFT")
+------------------------------------------------------------------------
+-- Missing tab
+------------------------------------------------------------------------
 
-    local colSourceHdr = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    colSourceHdr:SetPoint("LEFT", colNameHdr, "RIGHT", 4, 0)
-    colSourceHdr:SetText("Drop Source")
-    colSourceHdr:SetWidth(200)
-    colSourceHdr:SetJustifyH("LEFT")
+local function BuildMissingTab(parent)
+    local scroll = CreateFrame("ScrollFrame", nil, parent)
+    scroll:SetPoint("TOPLEFT",     parent, "TOPLEFT",     10, -14)
+    scroll:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -18, 8)
 
-    local colScoreHdr = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    colScoreHdr:SetPoint("LEFT", colSourceHdr, "RIGHT", 4, 0)
-    colScoreHdr:SetPoint("TOP", colNameHdr, "TOP", 0, 0)
-    colScoreHdr:SetText("Score")
-    colScoreHdr:SetWidth(54)
-    colScoreHdr:SetJustifyH("RIGHT")
+    local child = CreateFrame("Frame", nil, scroll)
+    child:SetWidth(460)
+    child:SetHeight(1)
+    scroll:SetScrollChild(child)
 
-    local missingScroll = CreateFrame("ScrollFrame", nil, parent)
-    missingScroll:SetPoint("TOPLEFT",     colNameHdr, "BOTTOMLEFT",  -4, -2)
-    missingScroll:SetPoint("BOTTOMRIGHT", parent,     "BOTTOMRIGHT", -18, 8)
+    local bar = CreateFrame("Slider", nil, scroll, "UIPanelScrollBarTemplate")
+    bar:SetPoint("TOPLEFT",    scroll, "TOPRIGHT",    -2, -4)
+    bar:SetPoint("BOTTOMLEFT", scroll, "BOTTOMRIGHT", -2,  4)
+    bar:SetValueStep(16)
 
-    local missingChild = CreateFrame("Frame", nil, missingScroll)
-    missingChild:SetWidth(460)
-    missingChild:SetHeight(1)
-    missingScroll:SetScrollChild(missingChild)
-
-    local missingBar = CreateFrame("Slider", nil, missingScroll, "UIPanelScrollBarTemplate")
-    missingBar:SetPoint("TOPLEFT",    missingScroll, "TOPRIGHT",    -2, -4)
-    missingBar:SetPoint("BOTTOMLEFT", missingScroll, "BOTTOMRIGHT", -2,  4)
-    missingBar:SetValueStep(16)
-
-    missingBar:SetScript("OnValueChanged", function(self, value)
-        missingChild:SetPoint("TOPLEFT", missingScroll, "TOPLEFT", 0, value)
+    bar:SetScript("OnValueChanged", function(self, value)
+        child:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, value)
     end)
-    missingScroll:EnableMouseWheel(true)
-    missingScroll:SetScript("OnMouseWheel", function(self, delta)
-        local v = missingBar:GetValue()
-        local mn, mx = missingBar:GetMinMaxValues()
-        missingBar:SetValue(math.max(mn, math.min(mx, v - delta * 16)))
+    scroll:EnableMouseWheel(true)
+    scroll:SetScript("OnMouseWheel", function(self, delta)
+        local v = bar:GetValue()
+        local mn, mx = bar:GetMinMaxValues()
+        bar:SetValue(math.max(mn, math.min(mx, v - delta * 16)))
     end)
 
-    return valueLabels, qualityLabels, missingScroll, missingChild, missingBar
+    return scroll, child, bar
 end
 
 ------------------------------------------------------------------------
@@ -543,8 +559,8 @@ end
 local overviewOuter
 local overviewDescText, overviewDescScroll, overviewDescChild, overviewDescBar
 local statsValueLabels, statsQualityLabels
-local statsMissingScroll, statsMissingChild, statsMissingBar
-local statsMissingRows = {}
+local missingScroll, missingChild, missingBar
+local missingRows = {}
 local function RefreshOverview()
     local build = state.build
     if not build then return end
@@ -560,6 +576,18 @@ local function RefreshOverview()
         build.author or "Unknown",
         specName,
         build.lastModified or ""))
+
+    -- Public / Validated status
+    local publicText = build.isPublic and "|cff19ff19Public|r" or "|cff888888Private|r"
+    local validatedText
+    if build.validated then
+        validatedText = " |cff19ff19(Validated)|r"
+    elseif build.isPublic then
+        validatedText = " |cffff4444(Not Validated)|r"
+    else
+        validatedText = ""
+    end
+    overviewOuter._statusLabel:SetText(publicText .. validatedText)
 
     overviewOuter._autoToggle:SetText(build.automationEnabled and "Automation: ON" or "Automation: OFF")
 
@@ -621,31 +649,32 @@ local function RefreshStats()
     statsValueLabels.mostPicked:SetText(type(mostPickedName) == "string" and mostPickedName or tostring(mostPickedName))
     local mostBannedName = next(st.mostBanned or {}) or "-"
     statsValueLabels.mostBanned:SetText(type(mostBannedName) == "string" and mostBannedName or tostring(mostBannedName))
+end
 
-    -- Missing Echoes (full-width bottom section, 3 columns)
-    if not statsMissingChild then return end
-    for _, btn in ipairs(statsMissingRows) do btn:Hide() end
+local function RefreshMissing()
+    local build = state.build
+    if not build or not missingChild then return end
+    for _, btn in ipairs(missingRows) do btn:Hide() end
     local missing = ComputeMissingEchoes(build)
     if missing == nil then
-        statsMissingChild.loadingLabel = statsMissingChild.loadingLabel or statsMissingChild:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        statsMissingChild.loadingLabel:SetPoint("TOPLEFT", statsMissingChild, "TOPLEFT", 4, -2)
-        statsMissingChild.loadingLabel:SetText("Requesting data...")
-        statsMissingChild.loadingLabel:Show()
-        statsMissingChild:SetHeight(20)
+        missingChild.loadingLabel = missingChild.loadingLabel or missingChild:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        missingChild.loadingLabel:SetPoint("TOPLEFT", missingChild, "TOPLEFT", 4, -2)
+        missingChild.loadingLabel:SetText("Requesting data...")
+        missingChild.loadingLabel:Show()
+        missingChild:SetHeight(20)
         return
     end
-    if statsMissingChild.loadingLabel then
-        statsMissingChild.loadingLabel:Hide()
+    if missingChild.loadingLabel then
+        missingChild.loadingLabel:Hide()
     end
     local currY = 0
     for _, entry in ipairs(missing) do
-        local rowIdx = #statsMissingRows + 1
-        -- Ensure we have enough rows in the pool
-        while #statsMissingRows < rowIdx do
-            local n = #statsMissingRows + 1
-            local btn = CreateFrame("Button", nil, statsMissingChild)
-            btn:SetPoint("LEFT", statsMissingChild, "LEFT", 4, 0)
-            btn:SetPoint("RIGHT", statsMissingChild, "RIGHT", -4, 0)
+        local rowIdx = #missingRows + 1
+        while #missingRows < rowIdx do
+            local n = #missingRows + 1
+            local btn = CreateFrame("Button", nil, missingChild)
+            btn:SetPoint("LEFT", missingChild, "LEFT", 4, 0)
+            btn:SetPoint("RIGHT", missingChild, "RIGHT", -4, 0)
             btn:RegisterForClicks("LeftButtonUp")
             btn:SetScript("OnEnter", function(self)
                 if not self._spellId then return end
@@ -664,13 +693,20 @@ local function RefreshStats()
                 GameTooltip:Show()
             end)
             btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            -- Icon
+            local icon = btn:CreateTexture(nil, "ARTWORK")
+            icon:SetWidth(24)
+            icon:SetHeight(24)
+            icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 2, -2)
+            icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            btn._icon = icon
             -- Name column
             local labelName = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            labelName:SetPoint("TOPLEFT", btn, "TOPLEFT", 2, -2)
-            labelName:SetWidth(180)
+            labelName:SetPoint("TOPLEFT", icon, "TOPRIGHT", 2, 0)
+            labelName:SetWidth(160)
             labelName:SetJustifyH("LEFT")
             btn._labelName = labelName
-            -- Drop Source column (may wrap, drives row height)
+            -- Drop Source column
             local labelSource = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
             labelSource:SetPoint("TOPLEFT", labelName, "TOPRIGHT", 4, 0)
             labelSource:SetWidth(200)
@@ -683,35 +719,34 @@ local function RefreshStats()
             labelScore:SetWidth(54)
             labelScore:SetJustifyH("RIGHT")
             btn._labelScore = labelScore
-            statsMissingRows[n] = btn
+            missingRows[n] = btn
         end
-        local btn = statsMissingRows[rowIdx]
+        local btn = missingRows[rowIdx]
         btn:ClearAllPoints()
         btn._spellId = entry.spellId
-        btn._dropSource = entry.dropSource
+        btn._icon:SetTexture(select(3, GetSpellInfo(entry.spellId)))
         local cc = QUALITY_COLORS[entry.quality] or QUALITY_COLORS[0]
         btn._labelName:SetText(entry.name)
         btn._labelName:SetTextColor(cc[1], cc[2], cc[3], 1)
         local cleanSource = (entry.dropSource or ""):gsub("^Can be found on ", "")
         btn._labelSource:SetText(cleanSource)
         btn._labelScore:SetText(string.format("%.0f", entry.score))
-        -- Dynamic row height based on source text wrapping
         local srcH = btn._labelSource:GetStringHeight() or 16
-        local rowH = math.max(18, srcH + 4)
+        local rowH = math.max(26, srcH + 4)
         btn:SetHeight(rowH)
-        btn:SetPoint("TOPLEFT", statsMissingChild, "TOPLEFT", 0, -currY)
-        btn:SetPoint("RIGHT", statsMissingChild, "RIGHT", -4, 0)
+        btn:SetPoint("TOPLEFT", missingChild, "TOPLEFT", 0, -currY)
+        btn:SetPoint("RIGHT", missingChild, "RIGHT", -4, 0)
         btn:Show()
         currY = currY + rowH + 2
     end
-    statsMissingChild:SetHeight(math.max(1, currY))
-    statsMissingBar:SetMinMaxValues(0, math.max(0, statsMissingChild:GetHeight() - statsMissingScroll:GetHeight()))
+    missingChild:SetHeight(math.max(1, currY))
+    missingBar:SetMinMaxValues(0, math.max(0, missingChild:GetHeight() - missingScroll:GetHeight()))
 end
 ------------------------------------------------------------------------
 -- BuildViewFrame
 ------------------------------------------------------------------------
 
-local switchOverview, switchStats, switchLogbook
+local switchOverview, switchStats, switchMissing, switchLogbook
 
 local function BuildViewFrame()
     local f = CreateFrame("Frame", "EbonBuildsBuildOverview", UIParent)
@@ -743,7 +778,13 @@ local function BuildViewFrame()
     local statsParent = CreateFrame("Frame", nil, contentArea)
     statsParent:SetAllPoints(contentArea)
     statsParent:Hide()
-    statsValueLabels, statsQualityLabels, statsMissingScroll, statsMissingChild, statsMissingBar = BuildStatsTab(statsParent)
+    statsValueLabels, statsQualityLabels = BuildStatsTab(statsParent)
+
+    -- Missing Echoes tab content (hidden by default)
+    local missingParent = CreateFrame("Frame", nil, contentArea)
+    missingParent:SetAllPoints(contentArea)
+    missingParent:Hide()
+    missingScroll, missingChild, missingBar = BuildMissingTab(missingParent)
 
     -- Build Logbook tab content (hidden by default)
     local logbookParent = CreateFrame("Frame", nil, contentArea)
@@ -751,37 +792,56 @@ local function BuildViewFrame()
     logbookParent:Hide()
     BuildLogbookTab(logbookParent)
 
+    -- Hide all tab content
+    local function HideAllContent()
+        overviewOuter:Hide()
+        statsParent:Hide()
+        missingParent:Hide()
+        logbookParent:Hide()
+    end
+
     -- Tab switching functions (defined after content so refs are valid)
     switchOverview = function()
-        statsParent:Hide()
-        logbookParent:Hide()
+        HideAllContent()
         overviewOuter:Show()
         overviewOuter._deleteBtn:Show()
         PanelTemplates_SetTab(f, 1)
         PanelTemplates_EnableTab(f, 2)
         PanelTemplates_EnableTab(f, 3)
+        PanelTemplates_EnableTab(f, 4)
         RefreshOverview()
     end
 
     switchStats = function()
-        overviewOuter:Hide()
+        HideAllContent()
         overviewOuter._deleteBtn:Hide()
-        logbookParent:Hide()
         statsParent:Show()
         PanelTemplates_SetTab(f, 2)
         PanelTemplates_EnableTab(f, 1)
         PanelTemplates_EnableTab(f, 3)
+        PanelTemplates_EnableTab(f, 4)
         RefreshStats()
     end
 
-    switchLogbook = function()
-        overviewOuter:Hide()
+    switchMissing = function()
+        HideAllContent()
         overviewOuter._deleteBtn:Hide()
-        statsParent:Hide()
-        logbookParent:Show()
+        missingParent:Show()
         PanelTemplates_SetTab(f, 3)
         PanelTemplates_EnableTab(f, 1)
         PanelTemplates_EnableTab(f, 2)
+        PanelTemplates_EnableTab(f, 4)
+        RefreshMissing()
+    end
+
+    switchLogbook = function()
+        HideAllContent()
+        overviewOuter._deleteBtn:Hide()
+        logbookParent:Show()
+        PanelTemplates_SetTab(f, 4)
+        PanelTemplates_EnableTab(f, 1)
+        PanelTemplates_EnableTab(f, 2)
+        PanelTemplates_EnableTab(f, 3)
         EbonBuilds.SessionHistory.Show(logbookParent)
     end
 
@@ -801,12 +861,19 @@ local function BuildViewFrame()
 
     tab3 = CreateFrame("Button", "EbonBuildsBuildOverviewTab3", f, "OptionsFrameTabButtonTemplate")
     tab3:SetID(3)
-    tab3:SetText("Logbook")
+    tab3:SetText("Missing")
     tab3:SetPoint("LEFT", tab2, "RIGHT", -16, 0)
     PanelTemplates_TabResize(tab3, 0)
-    tab3:SetScript("OnClick", function() if switchLogbook then switchLogbook() end end)
+    tab3:SetScript("OnClick", function() if switchMissing then switchMissing() end end)
 
-    PanelTemplates_SetNumTabs(f, 3)
+    tab4 = CreateFrame("Button", "EbonBuildsBuildOverviewTab4", f, "OptionsFrameTabButtonTemplate")
+    tab4:SetID(4)
+    tab4:SetText("Logbook")
+    tab4:SetPoint("LEFT", tab3, "RIGHT", -16, 0)
+    PanelTemplates_TabResize(tab4, 0)
+    tab4:SetScript("OnClick", function() if switchLogbook then switchLogbook() end end)
+
+    PanelTemplates_SetNumTabs(f, 4)
     PanelTemplates_SetTab(f, 1)
 
     return f
