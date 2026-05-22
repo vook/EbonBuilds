@@ -12,6 +12,7 @@ local state = {
     families = {},
 }
 local changeCallbacks = {}
+local searchEditBox = nil
 
 local function Notify()
     for i = 1, #changeCallbacks do
@@ -108,7 +109,12 @@ local function CreateSearchBox(bar)
         Notify()
     end)
     edit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    searchEditBox = edit
     return container
+end
+
+function EbonBuilds.Filters.FocusSearch()
+    if searchEditBox then searchEditBox:SetFocus() end
 end
 
 local function CreateQualityDropdown(bar, leftAnchor)

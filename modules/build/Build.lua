@@ -374,6 +374,7 @@ function EbonBuilds.Build.Save(id, data)
     build._checksum       = EbonBuilds.Build.Checksum(build)
     if build._checksum ~= oldChecksum then
         build.lastModified = date("%Y-%m-%d %H:%M:%S")
+        build.validated = false
         local playerName = UnitName("player") or "Unknown"
         if build.author and build.author ~= playerName then
             build.copiedFrom = build.author

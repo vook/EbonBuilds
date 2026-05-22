@@ -199,6 +199,7 @@ function EbonBuilds.EchoPicker.Show(callback, dataSource)
     ApplySearch()
     Render()
     frame:Show()
+    searchBox:SetFocus()
 end
 
 function EbonBuilds.EchoPicker.Hide()

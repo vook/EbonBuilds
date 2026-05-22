@@ -54,3 +54,32 @@ _G.RegisterAddonMessagePrefix = function(prefix) end
 _G.GetChannelName = function(i) return nil end
 _G.JoinChannelByName = function(name) return 1 end
 _G.SendChatMessage = function(msg, channel, lang, index) end
+
+-- Secure hooks
+_G.hooksecurefunc = function(table, funcName, hookFunc) end
+
+-- WoW string functions
+_G.strsplit = function(delim, str)
+    if not str or str == "" then return "", "", "" end
+    local parts = {}
+    local esc = delim:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
+    local pattern = "(.-)" .. esc
+    local lastEnd = 0
+    for part, matchEnd in str:gmatch(pattern .. "()") do
+        parts[#parts + 1] = part
+        lastEnd = matchEnd
+    end
+    if lastEnd <= #str then
+        parts[#parts + 1] = str:sub(lastEnd + #delim)
+    end
+    while #parts < 3 do parts[#parts + 1] = "" end
+    return unpack(parts)
+end
+_G.strtrim = function(s)
+    local r = (s or ""):match("^%s*(.-)%s*$")
+    return r or ""
+end
+
+-- Slash commands
+_G.SlashCmdList = {}
+_G.SLASH_EBBSYNC1 = nil

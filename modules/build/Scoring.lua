@@ -85,7 +85,7 @@ function EbonBuilds.Scoring.ComputePeak(classToken, settings)
         local e = list[i]
         if MatchesClass(e, bitVal) then
             local w  = EbonBuilds.Weights.Get(e.name) or 0
-            local sc = EbonBuilds.Scoring.ScorePerQuality(e, w, settings, e.quality)
+            local sc = EbonBuilds.Scoring.Score(e, w, settings)
             if bestScore == nil or sc > bestScore then
                 bestScore, bestName = sc, e.name
             end

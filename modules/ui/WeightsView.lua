@@ -40,6 +40,7 @@ function EbonBuilds.WeightsView.Mount(container)
     viewFrame:SetAllPoints(container)
     RefreshHeader()
     viewFrame:Show()
+    EbonBuilds.Filters.FocusSearch()
 end
 
 function EbonBuilds.WeightsView.Unmount()

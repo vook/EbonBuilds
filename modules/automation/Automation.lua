@@ -22,6 +22,7 @@ local evalTimerActive   = false
 local pendingChoices    = nil
 local origPerkUIShow    = nil
 local freezeRoundActive = false  -- true after freeze batch, cleared on select
+local cachedPeak        = nil    -- locked at first evaluation of the run
 
 ------------------------------------------------------------------------
 -- Internal helpers
@@ -52,6 +53,23 @@ local function StartEvalTimer()
     evalTimerFrame:Show()
 end
 
+-- Returns the cached peak (computed at first evaluation of the current run).
+-- The peak includes novelty and is locked for the duration of the run so
+-- threshold percentages remain stable.
+function EbonBuilds.Automation.GetPeak()
+    if cachedPeak then return cachedPeak end
+    local build = EbonBuilds.Build.GetActive()
+    if not build then return 1 end
+    local settings = EbonBuilds.Scoring.GetEffectiveSettings()
+    local _, score = EbonBuilds.Scoring.ComputePeak(build.class, settings)
+    cachedPeak = (score and score > 0) and score or 1
+    return cachedPeak
+end
+
+function EbonBuilds.Automation.ResetPeakCache()
+    cachedPeak = nil
+end
+
 local function GetRunData()
     if EbonholdPlayerRunData and EbonholdPlayerRunData.remainingBanishes ~= nil then
         return EbonholdPlayerRunData
@@ -77,7 +95,21 @@ local function ScoreChoice(choice, settings)
         classMask = data.classMask,
     }
     local weight = EbonBuilds.Weights.Get(name) or 0
-    local score  = EbonBuilds.Scoring.Score(entry, weight, settings)
+    -- Novelty only applies if the player has never picked this echo (by name,
+    -- across all quality tiers). Once picked, all qualities lose the bonus.
+    local granted = ProjectEbonhold.PerkService.GetGrantedPerks()
+    local isNovel = not granted or not granted[name]
+    local score
+    if isNovel then
+        score = EbonBuilds.Scoring.Score(entry, weight, settings)
+    else
+        score = EbonBuilds.Scoring.ScorePerQuality(entry, weight, settings, entry.quality)
+    end
+    -- Freeze penalty: frozen and carried echoes get a score reduction so they
+    -- are deprioritized in subsequent evaluations until eventually picked.
+    if (choice.isFrozen or choice.isCarried) and settings.freezePenaltyPct and settings.freezePenaltyPct > 0 then
+        score = score * (1 - settings.freezePenaltyPct / 100)
+    end
     return {
         index     = 0,
         spellId   = spellId,
@@ -141,13 +173,9 @@ local function TrySelect(scored, settings, build)
     local banList = settings.echoBanList or {}
     local nonBanned, all = {}, {}
     for _, s in ipairs(scored) do
-        if s.isBanned and s.isProtected then
-            -- Ignored: banned but family-protected
-        else
-            all[#all + 1] = s
-            if not banList[s.spellId] then
-                nonBanned[#nonBanned + 1] = s
-            end
+        all[#all + 1] = s
+        if not banList[s.spellId] then
+            nonBanned[#nonBanned + 1] = s
         end
     end
     local candidates = #nonBanned > 0 and nonBanned or all
@@ -196,8 +224,7 @@ function EbonBuilds.Automation.Evaluate()
     local runData    = GetRunData()
     local lockedList = build.lockedEchoes or {}
 
-    local _, peakScore = EbonBuilds.Scoring.ComputePeak(build.class, settings)
-    if not peakScore or peakScore == 0 then peakScore = 1 end
+    local peakScore = EbonBuilds.Automation.GetPeak()
 
     -- Score all offered choices
     local scored = {}
@@ -382,3 +409,9 @@ function EbonBuilds.Automation.Init()
 
     PerkUI._ebonBuildsHooked = true
 end
+
+-- Exported for unit testing
+EbonBuilds.Automation._ScoreChoice     = ScoreChoice
+EbonBuilds.Automation._TrySelect       = TrySelect
+EbonBuilds.Automation._AnnotateScored  = AnnotateScored
+EbonBuilds.Automation._IsProtected     = IsProtected
