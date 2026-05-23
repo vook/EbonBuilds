@@ -16,7 +16,14 @@ local QUALITY_BORDER_COLORS = {
     [4] = { 1.0, 128/255, 0.0 },
 }
 local QUALITY_LABELS = { "Common", "Uncommon", "Rare", "Epic", "Legendary" }
-local FAMILIES = { "Tank", "Survivability", "Healer", "Caster DPS", "Melee DPS", "Ranged DPS" }
+local FAMILIES = {
+    { key = "Tank",         label = "Tank" },
+    { key = "Survivability", label = "Survivability" },
+    { key = "Healer",       label = "Healer" },
+    { key = "Caster",       label = "Caster DPS" },
+    { key = "Melee",        label = "Melee DPS" },
+    { key = "Ranged",       label = "Ranged DPS" },
+}
 local WEIGHT_OPTIONS = {
     { label = "Want it", value = 50 },
     { label = "Good",   value = 40 },
@@ -29,6 +36,29 @@ local stepLabel, backBtn, nextBtn
 
 local state = {}
 local echoListCache = {}
+
+local function BuildFilteredEchoList()
+    local best = EbonBuilds.EchoTableRows.BuildBestByName()
+    local lockedSet = {}
+    for i = 1, 4 do
+        if state.locked[i] then
+            local n = GetSpellInfo(state.locked[i])
+            if n then lockedSet[n] = true end
+        end
+    end
+    local list = {}
+    for name, entry in pairs(best) do
+        if not state.echoes[name] and not lockedSet[name] then
+            list[#list + 1] = {
+                spellId = entry.spellId,
+                name    = name,
+                quality = entry.quality,
+            }
+        end
+    end
+    table.sort(list, function(a, b) return a.name < b.name end)
+    return list
+end
 
 ------------------------------------------------------------------------
 -- Helpers
@@ -184,7 +214,7 @@ local function RenderStep1()
                 local bc = QUALITY_BORDER_COLORS[quality] or QUALITY_BORDER_COLORS[0]
                 btn._border:SetTexture(bc[1], bc[2], bc[3])
                 btn._border:Show()
-            end)
+            end, BuildFilteredEchoList())
         end)
         lockedButtons[i] = btn
     end
@@ -242,10 +272,32 @@ end
 ------------------------------------------------------------------------
 
 local familyCycleLabels = { [0] = "|cff888888None|r", [10] = "Secondary +10", [20] = "Primary +20" }
-local familyCycleNext   = { [0] = 20, [20] = 10, [10] = 0 }
+local familyCycleValues = { 0, 10, 20 }
 
-local function RenderFamilyRow(family, anchorY)
-    local rowW = 340
+local function FamilyNextValue(current)
+    for i, v in ipairs(familyCycleValues) do
+        if v == current then
+            local nextIdx = i + 1
+            if nextIdx > #familyCycleValues then nextIdx = 1 end
+            return familyCycleValues[nextIdx]
+        end
+    end
+    return 0
+end
+
+local function FamilyPrevValue(current)
+    for i, v in ipairs(familyCycleValues) do
+        if v == current then
+            local prevIdx = i - 1
+            if prevIdx < 1 then prevIdx = #familyCycleValues end
+            return familyCycleValues[prevIdx]
+        end
+    end
+    return 0
+end
+
+local function RenderFamilyRow(familyEntry, anchorY)
+    local rowW = 360
     local row = CreateFrame("Frame", nil, contentArea)
     row:SetPoint("TOP", contentArea, "TOP", 0, anchorY)
     row:SetWidth(rowW)
@@ -255,21 +307,46 @@ local function RenderFamilyRow(family, anchorY)
     label:SetPoint("TOPLEFT", row, "TOPLEFT", 0, -2)
     label:SetWidth(130)
     label:SetJustifyH("RIGHT")
-    label:SetText(family)
+    label:SetText(familyEntry.label)
 
-    local currentVal = state.familyPriorities[family] or 0
+    local famKey = familyEntry.key
+    local currentVal = state.familyPriorities[famKey] or 0
+
     local btn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-    btn:SetWidth(140)
+    btn:SetWidth(100)
     btn:SetHeight(22)
-    btn:SetPoint("LEFT", label, "RIGHT", 8, 0)
+    btn:SetPoint("LEFT", label, "RIGHT", 32, 0)
     btn:SetText(familyCycleLabels[currentVal])
-    btn._family = family
 
-    btn:SetScript("OnClick", function(self)
-        local val = state.familyPriorities[family] or 0
-        local nextVal = familyCycleNext[val]
-        state.familyPriorities[family] = nextVal
-        self:SetText(familyCycleLabels[nextVal])
+    local function RefreshBtn()
+        btn:SetText(familyCycleLabels[state.familyPriorities[famKey] or 0])
+    end
+
+    local leftArrow = CreateFrame("Button", nil, row)
+    leftArrow:SetWidth(18)
+    leftArrow:SetHeight(18)
+    leftArrow:SetPoint("RIGHT", btn, "LEFT", -8, 0)
+    leftArrow:SetNormalFontObject("GameFontNormal")
+    leftArrow:SetText("<")
+    leftArrow:SetScript("OnClick", function()
+        state.familyPriorities[famKey] = FamilyPrevValue(state.familyPriorities[famKey] or 0)
+        RefreshBtn()
+    end)
+
+    local rightArrow = CreateFrame("Button", nil, row)
+    rightArrow:SetWidth(18)
+    rightArrow:SetHeight(18)
+    rightArrow:SetPoint("LEFT", btn, "RIGHT", 8, 0)
+    rightArrow:SetNormalFontObject("GameFontNormal")
+    rightArrow:SetText(">")
+    rightArrow:SetScript("OnClick", function()
+        state.familyPriorities[famKey] = FamilyNextValue(state.familyPriorities[famKey] or 0)
+        RefreshBtn()
+    end)
+
+    btn:SetScript("OnClick", function()
+        state.familyPriorities[famKey] = FamilyNextValue(state.familyPriorities[famKey] or 0)
+        RefreshBtn()
     end)
 
     return row
@@ -284,10 +361,10 @@ local function RenderStep3()
 
     local desc = contentArea:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     desc:SetPoint("TOP", contentArea, "TOP", 0, -42)
-    desc:SetText("Click each family to cycle: None > Primary +20 > Secondary +10")
+    desc:SetText("Defaults are good for most builds. Change only if you really need to.")
 
-    for i, family in ipairs(FAMILIES) do
-        RenderFamilyRow(family, -72 - (i - 1) * 30)
+    for i, entry in ipairs(FAMILIES) do
+        RenderFamilyRow(entry, -72 - (i - 1) * 30)
     end
 end
 
@@ -475,11 +552,9 @@ local function RenderStep5()
     addBtn:SetText("+ Add Echo")
     addBtn:SetScript("OnClick", function()
         EbonBuilds.EchoPicker.Show(function(spellId, quality, name)
-            if not state.echoes[name] then
-                state.echoes[name] = { spellId = spellId, quality = quality, name = name, weight = 40 }
-            end
+            state.echoes[name] = { spellId = spellId, quality = quality, name = name, weight = 40 }
             RenderStep5()
-        end)
+        end, BuildFilteredEchoList())
     end)
 
     local rowStartY = -96
@@ -623,10 +698,10 @@ local function CreateBuildFromWizard()
     end
 
     -- Family bonus
-    for _, family in ipairs(FAMILIES) do
-        local val = state.familyPriorities[family] or 0
+    for _, entry in ipairs(FAMILIES) do
+        local val = state.familyPriorities[entry.key] or 0
         if val > 0 then
-            settings.familyBonus[family] = val
+            settings.familyBonus[entry.key] = val
         end
     end
 
@@ -640,38 +715,21 @@ local function CreateBuildFromWizard()
     -- Locked echoes
     local locked = { state.locked[1], state.locked[2], state.locked[3], state.locked[4] }
 
-    -- Use BuildForm state for class/spec/title
-    local buildClass = EbonBuilds.BuildForm and EbonBuilds.BuildForm.GetEditingClass and EbonBuilds.BuildForm.GetEditingClass()
     local playerClass = EbonBuilds.Build.PlayerClassToken()
-    local klass = buildClass or playerClass
-    local spec = EbonBuilds.Build.PlayerTopTalentTab()
 
-    local build = EbonBuilds.Build.Create({
-        title = state.wizardTitle ~= "" and state.wizardTitle or "New Build",
-        class = klass,
-        spec = spec,
-        comments = state.wizardDescription or "",
+    -- Store wizard data so BuildForm can load it in create mode
+    EbonBuildsDB._wizardPrefill = {
+        title        = state.wizardTitle ~= "" and state.wizardTitle or "New Build",
+        class        = playerClass,
+        spec         = EbonBuilds.Build.PlayerTopTalentTab(),
+        comments     = state.wizardDescription or "",
         lockedEchoes = locked,
-        settings = settings,
-        isPublic = false,
-        echoWeights = EbonBuildsDB.pendingWeights,
-    })
-
+        settings     = settings,
+        isPublic     = false,
+    }
     EbonBuildsDB._isEditingBuild = true
-    EbonBuildsDB.pendingWeights = EbonBuildsDB.pendingWeights or {}
-    if build.echoWeights then
-        for name, weight in pairs(build.echoWeights) do
-            EbonBuildsDB.pendingWeights[name] = weight
-        end
-    end
 
-    EbonBuilds.Build.SetActive(build.id)
-
-    if EbonBuilds.BuildList and EbonBuilds.BuildList.Refresh then
-        EbonBuilds.BuildList.Refresh()
-    end
-
-    EbonBuilds.ViewRouter.Show("buildTabs", { mode = "edit", build = build })
+    EbonBuilds.ViewRouter.Show("buildTabs", { mode = "create", fromWizard = true })
 end
 
 ------------------------------------------------------------------------

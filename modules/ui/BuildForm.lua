@@ -404,6 +404,7 @@ local function OnSave()
     end
     EbonBuildsDB._isEditingBuild = nil
     EbonBuildsDB.pendingWeights = nil
+    EbonBuildsDB._wizardPrefill = nil
     if EbonBuilds.BuildList and EbonBuilds.BuildList.Refresh then
         EbonBuilds.BuildList.Refresh()
     end
@@ -422,6 +423,7 @@ end
 local function OnCancel()
     EbonBuildsDB._isEditingBuild = nil
     EbonBuildsDB.pendingWeights = nil
+    EbonBuildsDB._wizardPrefill = nil
     local active = EbonBuilds.Build.GetActive()
     if active then
         EbonBuilds.ViewRouter.Show("buildOverview", { build = active })
@@ -434,6 +436,7 @@ local function OnDelete()
     if not state.id then return end
     EbonBuildsDB._isEditingBuild = nil
     EbonBuildsDB.pendingWeights = nil
+    EbonBuildsDB._wizardPrefill = nil
     EbonBuilds.Build.Delete(state.id)
     if EbonBuilds.BuildList and EbonBuilds.BuildList.Refresh then
         EbonBuilds.BuildList.Refresh()
@@ -526,6 +529,22 @@ local function LoadDefaults()
     for i = 1, 4 do state.locked[i] = nil end
     EbonBuildsDB._isEditingBuild = true
     EbonBuildsDB.pendingWeights = {}
+    EbonBuildsDB._wizardPrefill = nil
+end
+
+local function LoadFromWizardPrefill()
+    local pre = EbonBuildsDB._wizardPrefill
+    state.mode     = "create"
+    state.id       = nil
+    state.title    = pre.title or ""
+    state.class    = pre.class or EbonBuilds.Build.PlayerClassToken()
+    state.spec     = pre.spec or EbonBuilds.Build.PlayerTopTalentTab()
+    state.comments = pre.comments or ""
+    state.settings = pre.settings or EbonBuilds.Build.DefaultSettings()
+    state.isPublic = pre.isPublic or false
+    for i = 1, 4 do state.locked[i] = (pre.lockedEchoes and pre.lockedEchoes[i]) or nil end
+    EbonBuildsDB._isEditingBuild = true
+    EbonBuildsDB.pendingWeights = EbonBuildsDB.pendingWeights or {}
 end
 
 ------------------------------------------------------------------------
@@ -547,7 +566,9 @@ function EbonBuilds.BuildForm.Mount(container, context)
     context = context or {}
     local keepState = TargetMatchesState(context)
     if not keepState then
-        if context.mode == "edit" and context.build then
+        if context.mode == "create" and context.fromWizard and EbonBuildsDB._wizardPrefill then
+            LoadFromWizardPrefill()
+        elseif context.mode == "edit" and context.build then
             LoadFromBuild(context.build)
         else
             LoadDefaults()
