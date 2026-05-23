@@ -298,7 +298,7 @@ local function CreateNewBuildButton(parent, topAnchor)
     btn:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, 0)
     btn:SetText("+ New Build")
     btn:SetScript("OnClick", function()
-        EbonBuilds.ViewRouter.Show("buildTabs", { mode = "create" })
+        EbonBuilds.ViewRouter.Show("buildWizard")
     end)
     return btn
 end

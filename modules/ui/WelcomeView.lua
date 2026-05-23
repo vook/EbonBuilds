@@ -29,7 +29,7 @@ local function BuildViewFrame(parent)
     newBtn:SetPoint("TOP", sub, "BOTTOM", 0, -24)
     newBtn:SetText("+ New Build")
     newBtn:SetScript("OnClick", function()
-        EbonBuilds.ViewRouter.Show("buildTabs", { mode = "create" })
+        EbonBuilds.ViewRouter.Show("buildWizard")
     end)
 
     local publicBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
