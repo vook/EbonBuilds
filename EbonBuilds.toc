@@ -12,6 +12,7 @@ modules/ui/MainWindow.lua
 modules/ui/ViewRouter.lua
 modules/ui/BuildList.lua
 modules/ui/EchoPicker.lua
+modules/ui/BuildWizard.lua
 modules/ui/BuildForm.lua
 modules/ui/Filters.lua
 modules/ui/EchoTableRows.lua
