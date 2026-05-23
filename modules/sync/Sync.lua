@@ -58,9 +58,6 @@ local function IsSyncChannelName(name)
     return name:lower():find(SYNC_CHANNEL, 1, true) ~= nil
 end
 
-local function SixtyDaysAgo()
-    return date("%Y-%m-%d %H:%M:%S", time() - 60 * 24 * 3600)
-end
 
 local function IsoToEpoch(iso)
     if not iso or iso == "" then return 0 end
@@ -269,10 +266,10 @@ end
 -- Core request handler (responder side)
 ------------------------------------------------------------------------
 
-local function HandleRequest(requester, lastDate)
+local function HandleRequest(requester)
     if not requester or requester == "" or requester == UnitName("player") then return end
 
-    Log("Sync request from " .. requester .. " (lastSyncDate=" .. lastDate .. ")")
+    Log("Sync request from " .. requester)
 
     EbonBuildsDB.syncPeers = EbonBuildsDB.syncPeers or {}
     EbonBuildsDB.syncPeers[requester] = true
@@ -286,22 +283,13 @@ local function HandleRequest(requester, lastDate)
         return
     end
 
-    local cutoffEpoch = IsoToEpoch(SixtyDaysAgo())
-    local lastDateEpoch = IsoToEpoch(lastDate)
     local eligible = {}
     for _, build in ipairs(allPublic) do
         if build.author ~= requester then
             if VALIDATION_REQUIRED and not build.validated then
                 VerboseLog("  build " .. (build.title or "?") .. " skipped: not validated")
             else
-                local modEpoch = DateToEpoch(build.lastModified)
-                if lastDate == "0" then
-                    if modEpoch >= cutoffEpoch then eligible[#eligible + 1] = build
-                    else VerboseLog("  build " .. (build.title or "?") .. " skipped: too old (" .. (build.lastModified or "?") .. ")") end
-                else
-                    if modEpoch > lastDateEpoch then eligible[#eligible + 1] = build
-                    else VerboseLog("  build " .. (build.title or "?") .. " skipped: not newer than last sync") end
-                end
+                eligible[#eligible + 1] = build
             end
         else
             VerboseLog("  build " .. (build.title or "?") .. " skipped: authored by requester")
@@ -350,7 +338,7 @@ local function HandleChannelMessage(msg, sender, _, channelName, _, _, channelNu
     local code = parts[1]
     if code ~= "REQ" then return end
     Log("REQ received via channel from " .. (sender or "?"))
-    local ok, err = pcall(HandleRequest, parts[2], parts[3])
+    local ok, err = pcall(HandleRequest, parts[2])
     if not ok then Log("HandleRequest error: " .. tostring(err)) end
 end
 
@@ -361,7 +349,7 @@ end
 local function HandleAddonREQ(payload, sender)
     local parts = {strsplit("|", payload)}
     if parts[1] ~= "REQ" then return end
-    HandleRequest(parts[2], parts[3])
+    HandleRequest(parts[2])
 end
 
 local function HandleChunk(payload, sender)
@@ -526,14 +514,9 @@ function EbonBuilds.Sync.RequestSync()
     lastRequestTime = Now()
 
     local me       = UnitName("player")
-    local lastDate = EbonBuildsDB.lastSyncDate or "0"
-    local payload  = string.format("REQ|%s|%s", me, lastDate)
+    local payload  = string.format("REQ|%s", me)
 
-    if lastDate == "0" then
-        Log("Requesting sync (first time, builds from last 60 days)...")
-    else
-        Log("Requesting sync (builds newer than " .. lastDate .. ")...")
-    end
+    Log("Requesting sync...")
 
     -- 1. Broadcast via hidden chat channel (all addon users on the realm)
     RefreshChannel()

@@ -90,7 +90,7 @@ end
 ------------------------------------------------------------------------
 
 local function RefreshPeak()
-    if not peakLabel then return end
+    if not peakLabel then return 0 end
     local settings = EbonBuilds.BuildForm.GetEditingSettings()
     local class    = EbonBuilds.BuildForm.GetEditingClass()
     local name, score = EbonBuilds.Scoring.ComputePeak(class, settings)
@@ -99,6 +99,7 @@ local function RefreshPeak()
     else
         peakLabel:SetText("Peak: (no echoes)")
     end
+    return score or 0
 end
 
 ------------------------------------------------------------------------
@@ -374,8 +375,14 @@ local function BuildEchoBanSection(parent, x, y)
 
     echoBanFrame = listFrame
 
+    local note = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    note:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y - 138)
+    note:SetWidth(490)
+    note:SetJustifyH("LEFT")
+    note:SetText("Banned echoes with protected families are deprioritized, not excluded from selection. If all offered are banned, the fallback below applies.")
+
     local allLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    allLabel:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y - 178)
+    allLabel:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y - 170)
     allLabel:SetWidth(300)
     allLabel:SetJustifyH("LEFT")
     allLabel:SetText("When all offered are banned and no charges left:")
@@ -383,7 +390,7 @@ local function BuildEchoBanSection(parent, x, y)
     echoBanAllButton = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     echoBanAllButton:SetWidth(110)
     echoBanAllButton:SetHeight(20)
-    echoBanAllButton:SetPoint("TOPLEFT", parent, "TOPLEFT", x + 310, y - 173)
+    echoBanAllButton:SetPoint("TOPLEFT", parent, "TOPLEFT", x + 310, y - 165)
     echoBanAllButton:SetText("Highest Score")
     echoBanAllButton._value = "highestScore"
     echoBanAllButton:SetScript("OnClick", function(self)
@@ -407,6 +414,10 @@ local function BuildPeakRow(parent, x, y)
     peakLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     peakLabel:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
     peakLabel:SetText("Peak: -")
+
+    local note = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    note:SetPoint("TOPLEFT", peakLabel, "BOTTOMLEFT", 0, -2)
+    note:SetText("Peak includes the novelty bonus. Locked at run start.")
 end
 
 ------------------------------------------------------------------------
@@ -447,6 +458,15 @@ local function CreateThresholdSlider(parent, x, y, entry)
     valText:SetJustifyH("LEFT")
     slider._valText = valText
 
+    local absLabel = nil
+    if entry.key ~= "freezePenaltyPct" then
+        absLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        absLabel:SetPoint("LEFT", valText, "RIGHT", 2, 0)
+        absLabel:SetWidth(60)
+        absLabel:SetJustifyH("LEFT")
+    end
+    slider._absLabel = absLabel
+
     local hint = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     hint:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", 0, -4)
     hint:SetWidth(SLIDER_W)
@@ -458,7 +478,16 @@ local function CreateThresholdSlider(parent, x, y, entry)
         valText:SetText(v .. "%")
         local settings = EbonBuilds.BuildForm.GetEditingSettings()
         settings[entry.key] = v
-        RefreshPeak()
+        if self._absLabel then
+            local peak = RefreshPeak()
+            if peak > 0 then
+                self._absLabel:SetText("= " .. math.floor(peak * v / 100))
+            else
+                self._absLabel:SetText("")
+            end
+        else
+            RefreshPeak()
+        end
     end)
 
     return slider
@@ -501,7 +530,18 @@ local function RefreshInputs()
         echoBanAllButton._value = mode
         echoBanAllButton:SetText(mode == "random" and "Random" or "Highest Score")
     end
-    RefreshPeak()
+    local peak = RefreshPeak()
+    for _, entry in ipairs(THRESHOLDS) do
+        local slider = thresholdSliders[entry.key]
+        if slider and slider._absLabel then
+            local val = settings[entry.key] or 0
+            if peak > 0 then
+                slider._absLabel:SetText("= " .. math.floor(peak * val / 100))
+            else
+                slider._absLabel:SetText("")
+            end
+        end
+    end
 end
 
 local function CommitFocusedBoxes()

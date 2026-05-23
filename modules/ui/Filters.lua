@@ -10,8 +10,10 @@ local state = {
     text     = "",
     quality  = nil,
     families = {},
+    showAllClasses = false,
 }
 local changeCallbacks = {}
+local searchEditBox = nil
 
 local function Notify()
     for i = 1, #changeCallbacks do
@@ -80,13 +82,9 @@ end
 ------------------------------------------------------------------------
 
 local function CreateSearchBox(bar)
-    local label = bar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    label:SetPoint("LEFT", bar, "LEFT", 2, 0)
-    label:SetText("Search:")
-
     local container = CreateFrame("Frame", nil, bar)
-    container:SetSize(120, 22)
-    container:SetPoint("LEFT", label, "RIGHT", 4, 0)
+    container:SetSize(140, 22)
+    container:SetPoint("LEFT", bar, "LEFT", 0, 0)
     container:SetBackdrop({
         bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -97,7 +95,7 @@ local function CreateSearchBox(bar)
     container:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
 
     local edit = CreateFrame("EditBox", nil, container)
-    edit:SetSize(114, 18)
+    edit:SetSize(134, 18)
     edit:SetPoint("CENTER", container, "CENTER", 0, 0)
     edit:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
     edit:SetTextColor(1, 1, 1, 1)
@@ -108,16 +106,21 @@ local function CreateSearchBox(bar)
         Notify()
     end)
     edit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    searchEditBox = edit
     return container
 end
 
-local function CreateQualityDropdown(bar, leftAnchor)
-    local label = bar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    label:SetPoint("LEFT", leftAnchor, "RIGHT", 6, 0)
-    label:SetText("Quality:")
+function EbonBuilds.Filters.FocusSearch()
+    if searchEditBox then searchEditBox:SetFocus() end
+end
 
+function EbonBuilds.Filters.ShowAllClasses()
+    return state.showAllClasses
+end
+
+local function CreateQualityDropdown(bar, leftAnchor)
     local dropdown = CreateFrame("Frame", "EbonBuildsFiltersQualityDD", bar, "UIDropDownMenuTemplate")
-    dropdown:SetPoint("LEFT", label, "RIGHT", -10, -2)
+    dropdown:SetPoint("LEFT", leftAnchor, "RIGHT", 0, -2)
 
     UIDropDownMenu_SetWidth(dropdown, 90)
     UIDropDownMenu_SetText(dropdown, "All")
@@ -139,7 +142,7 @@ end
 
 local function CreateFamilyDropdown(bar, leftAnchor)
     local dropdown = CreateFrame("Frame", "EbonBuildsFiltersFamilyDD", bar, "UIDropDownMenuTemplate")
-    dropdown:SetPoint("LEFT", leftAnchor, "RIGHT", -4, 0)
+    dropdown:SetPoint("LEFT", leftAnchor, "RIGHT", -6, 0)
     UIDropDownMenu_SetWidth(dropdown, 130)
 
     local function UpdateFamilyLabel()
@@ -189,6 +192,31 @@ function EbonBuilds.Filters.Init(parent)
     local searchContainer = CreateSearchBox(bar)
     local qualityDropdown = CreateQualityDropdown(bar, searchContainer)
     local familyDropdown  = CreateFamilyDropdown(bar, qualityDropdown)
+
+    local cb = CreateFrame("Button", nil, bar)
+    cb:SetSize(16, 16)
+    cb:SetPoint("LEFT", familyDropdown, "RIGHT", 2, 0)
+
+    local cbBg = cb:CreateTexture(nil, "BORDER")
+    cbBg:SetAllPoints(cb)
+    cbBg:SetTexture("Interface\\Buttons\\UI-CheckBox-Up")
+    cbBg:SetAlpha(0.8)
+
+    local cbCheck = cb:CreateTexture(nil, "ARTWORK")
+    cbCheck:SetWidth(14); cbCheck:SetHeight(14)
+    cbCheck:SetPoint("CENTER", cb, "CENTER", 0, 0)
+    cbCheck:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+    cbCheck:Hide()
+
+    local cbLabel = bar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    cbLabel:SetPoint("LEFT", cb, "RIGHT", 2, 0)
+    cbLabel:SetText("Show all classes")
+
+    cb:SetScript("OnClick", function()
+        state.showAllClasses = not state.showAllClasses
+        if state.showAllClasses then cbCheck:Show() else cbCheck:Hide() end
+        Notify()
+    end)
 
     return bar
 end

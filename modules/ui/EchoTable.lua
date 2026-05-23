@@ -18,6 +18,9 @@ local CLASS_BITS = {
 }
 
 local function ApplyClassFilter(list)
+    if EbonBuilds.Filters and EbonBuilds.Filters.ShowAllClasses and EbonBuilds.Filters.ShowAllClasses() then
+        return list
+    end
     local token
     if EbonBuilds.BuildForm and EbonBuilds.BuildForm.GetEditingClass then
         token = EbonBuilds.BuildForm.GetEditingClass()
