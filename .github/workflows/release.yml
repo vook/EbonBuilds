@@ -1,0 +1,26 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create zip with EbonBuilds folder
+        run: |
+          mkdir -p dist/EbonBuilds
+          cp -r core dist/EbonBuilds/
+          cp -r modules dist/EbonBuilds/
+          cp EbonBuilds.toc dist/EbonBuilds/
+          cd dist && zip -r ../EbonBuilds.zip EbonBuilds/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: EbonBuilds.zip
+          generate_release_notes: true
