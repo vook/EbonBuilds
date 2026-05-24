@@ -216,7 +216,7 @@ local function BuildExportData(build)
 		class = build.class,
 		spec = build.spec,
 		comments = build.comments,
-		lockedEchoes = build.lockedEchoes or { nil, nil, nil, nil },
+		lockedEchoes = build.lockedEchoes or { nil, nil, nil, nil, nil },
 		echoWeights = filteredWeights,
 		settings = build.settings,
 		automationEnabled = build.automationEnabled,
@@ -243,7 +243,7 @@ function EbonBuilds.ExportImport.DecodeBuild(b64String)
 	if not data or type(data) ~= "table" then return nil end
 
 	local locked = data.lockedEchoes or {}
-	for i = 1, 4 do locked[i] = locked[i] or nil end
+	for i = 1, EbonBuilds.Build.LOCKED_SLOTS do locked[i] = locked[i] or nil end
 
 	local echoWeights = nil
 	if data.echoWeights and next(data.echoWeights) then

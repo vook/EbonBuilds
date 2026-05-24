@@ -4,6 +4,8 @@
 
 EbonBuilds.Build = {}
 
+EbonBuilds.Build.LOCKED_SLOTS = 5
+
 local function DefaultSettings()
     return {
         qualityBonus        = { [0] = 0, [1] = 0, [2] = 0, [3] = 0, [4] = 0 },
@@ -63,7 +65,7 @@ function EbonBuilds.Build.Checksum(build)
         build.comments or "",
     }
     local le = build.lockedEchoes or {}
-    for i = 1, 4 do
+    for i = 1, EbonBuilds.Build.LOCKED_SLOTS do
         parts[#parts + 1] = tostring(le[i] or "nil")
     end
     if build.echoWeights then
@@ -184,7 +186,7 @@ function EbonBuilds.Build.Migrate()
             class           = PlayerClassToken(),
             spec            = PlayerTopTalentTab(),
             comments        = "",
-            lockedEchoes = { nil, nil, nil, nil },
+            lockedEchoes = { nil, nil, nil, nil, nil },
             echoWeights     = legacy,
             settings        = DefaultSettings(),
             version         = 1,
@@ -296,7 +298,7 @@ function EbonBuilds.Build.NewObject(data)
         class           = data.class or PlayerClassToken(),
         spec            = data.spec or PlayerTopTalentTab(),
         comments        = data.comments or "",
-        lockedEchoes = data.lockedEchoes or { nil, nil, nil, nil },
+        lockedEchoes = data.lockedEchoes or { nil, nil, nil, nil, nil },
         echoWeights     = data.echoWeights or {},
         settings        = data.settings or DefaultSettings(),
         version         = 1,
@@ -336,8 +338,8 @@ function EbonBuilds.Build.UpdateFromPublic(localBuild, publicBuild)
     localBuild.class            = publicBuild.class            or localBuild.class
     localBuild.spec             = publicBuild.spec             or localBuild.spec
     localBuild.comments         = publicBuild.comments         or localBuild.comments
-    localBuild.lockedEchoes     = { nil, nil, nil, nil }
-    for i = 1, 4 do
+    localBuild.lockedEchoes     = { nil, nil, nil, nil, nil }
+    for i = 1, EbonBuilds.Build.LOCKED_SLOTS do
         localBuild.lockedEchoes[i] = (publicBuild.lockedEchoes and publicBuild.lockedEchoes[i]) or nil
     end
     if publicBuild.settings then

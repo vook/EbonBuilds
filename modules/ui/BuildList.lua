@@ -126,7 +126,7 @@ local function CreateRow(parent)
 
     -- Locked echo icon buttons (22x22, bottom row)
     row._lockedBtns = {}
-    for i = 1, 4 do
+    for i = 1, 5 do
         local btn = CreateIconButton(row, 22)
         btn:Hide()
         row._lockedBtns[i] = btn
@@ -213,7 +213,7 @@ local function PopulateRow(row, build, activeId, yOffset)
 
     -- Locked echo icons
     local lockeds = build.lockedEchoes
-    for i = 1, 4 do
+    for i = 1, 5 do
         local btn = row._lockedBtns[i]
         local spellId = lockeds and lockeds[i]
         btn:ClearAllPoints()

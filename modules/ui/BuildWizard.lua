@@ -40,7 +40,7 @@ local echoListCache = {}
 local function BuildFilteredEchoList()
     local best = EbonBuilds.EchoTableRows.BuildBestByName()
     local lockedSet = {}
-    for i = 1, 4 do
+    for i = 1, 5 do
         if state.locked[i] then
             local n = GetSpellInfo(state.locked[i])
             if n then lockedSet[n] = true end
@@ -104,7 +104,7 @@ local function ClearContent()
 end
 
 local function HasAdaptivePower()
-    for i = 1, 4 do
+    for i = 1, 5 do
         local id = state.locked[i]
         if id then
             local name = GetSpellInfo(id)
@@ -166,14 +166,14 @@ local function RenderStep1()
 
     local title = contentArea:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     title:SetPoint("TOP", contentArea, "TOP", 0, -20)
-    title:SetText("Select your 4 locked echoes")
+    title:SetText("Select your 5 locked echoes")
 
     local slotSize = 48
     local spacing  = 10
-    local totalW   = 4 * slotSize + 3 * spacing
+    local totalW   = 5 * slotSize + 4 * spacing
     local startX   = -math.floor(totalW / 2)
 
-    for i = 1, 4 do
+    for i = 1, 5 do
         local btn = CreateIconButton(contentArea, slotSize)
         btn:SetPoint("TOP", contentArea, "TOP", startX + (i - 1) * (slotSize + spacing), -90)
         btn._icon:SetTexture("Interface\\Buttons\\UI-EmptySlot")
@@ -472,12 +472,11 @@ end
 ------------------------------------------------------------------------
 
 local echoRows = {}
-local RenderStep5  -- forward declaration for RenderEchoRow closure
 
 local function RenderEchoRow(parent, entry, index, y)
     local row = CreateFrame("Frame", nil, parent)
-    row:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, y)
-    row:SetPoint("RIGHT",   parent, "RIGHT",   0, 0)
+    row:SetPoint("TOPLEFT", parent, "TOPLEFT", 6, y)
+    row:SetPoint("RIGHT",   parent, "RIGHT",   -6, 0)
     row:SetHeight(28)
 
     local icon = row:CreateTexture(nil, "ARTWORK")
@@ -526,7 +525,7 @@ local function RenderEchoRow(parent, entry, index, y)
     removeBtn:SetText("Remove")
     removeBtn:SetScript("OnClick", function()
         state.echoes[entry.name] = nil
-        RenderStep5()
+        RenderCurrentStep()
     end)
 
     table.insert(echoRows, row)
@@ -558,14 +557,33 @@ local function RenderStep5()
         end, BuildFilteredEchoList())
     end)
 
-    local sf = CreateFrame("ScrollFrame", nil, contentArea, "UIPanelScrollFrameTemplate")
+    local sf = CreateFrame("ScrollFrame", "EbonBuildsWizardEchoScroll", contentArea)
     sf:SetPoint("TOPLEFT",     contentArea, "TOPLEFT",     10, -90)
-    sf:SetPoint("BOTTOMRIGHT", contentArea, "BOTTOMRIGHT", -22,   0)
+    sf:SetPoint("BOTTOMRIGHT", contentArea, "BOTTOMRIGHT", -20,   0)
+
+    -- Backdrop
+    sf:SetBackdrop({
+        bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 8, edgeSize = 8,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    sf:SetBackdropColor(0, 0, 0, 0.4)
+    sf:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
+
+    -- ScrollBar (inset vertically to keep up/down buttons inside backdrop)
+    local sb = CreateFrame("Slider", "EbonBuildsWizardEchoScrollBar", sf, "UIPanelScrollBarTemplate")
+    sb:SetPoint("TOPRIGHT",    sf, "TOPRIGHT",    -4, -20)
+    sb:SetPoint("BOTTOMRIGHT", sf, "BOTTOMRIGHT", -4,  20)
+    sb:SetOrientation("VERTICAL")
+    sb:SetValueStep(30)
+    sb:SetMinMaxValues(0, 0)
+    sb:SetValue(0)
+    sb:SetScript("OnValueChanged", function(self, value)
+        sf:SetVerticalScroll(value)
+    end)
 
     local child = CreateFrame("Frame", nil, sf)
-    child:SetWidth(1)
-    child:SetHeight(1)
-    sf:SetScrollChild(child)
 
     local sorted = {}
     for _, entry in pairs(state.echoes) do
@@ -579,11 +597,42 @@ local function RenderStep5()
         hint:SetText("No echoes added yet. Click \"+ Add Echo\" to start.")
     end
 
-    child:SetWidth(contentArea:GetWidth() - 32)
+    child:SetWidth(contentArea:GetWidth() - 54)
+    child:SetHeight(1)
+    sf:SetScrollChild(child)
+
     for i, entry in ipairs(sorted) do
         RenderEchoRow(child, entry, i, -(i - 1) * 30)
     end
     child:SetHeight(math.max(1, #sorted * 30))
+
+    sf:EnableMouseWheel(true)
+    sf:SetScript("OnMouseWheel", function(self, delta)
+        local childH = child:GetHeight()
+        local sfH = self:GetHeight()
+        local range = math.max(0, childH - sfH)
+        if range <= 0 then return end
+        local newPos = self:GetVerticalScroll() - delta * 30
+        if newPos < 0 then newPos = 0
+        elseif newPos > range then newPos = range end
+        self:SetVerticalScroll(newPos)
+        sb:SetValue(newPos)
+    end)
+
+    -- Update scrollbar range after layout settles
+    local function UpdateRange()
+        local childH = child:GetHeight()
+        local sfH = sf:GetHeight()
+        local range = math.max(0, childH - sfH)
+        sb:SetMinMaxValues(0, range)
+        if range > 0 then
+            sb:Show()
+        else
+            sb:Hide()
+        end
+    end
+    sf:SetScript("OnSizeChanged", UpdateRange)
+    UpdateRange()
 end
 
 ------------------------------------------------------------------------
@@ -722,7 +771,7 @@ local function CreateBuildFromWizard()
     end
 
     -- Locked echoes
-    local locked = { state.locked[1], state.locked[2], state.locked[3], state.locked[4] }
+    local locked = { state.locked[1], state.locked[2], state.locked[3], state.locked[4], state.locked[5] }
 
     local playerClass = EbonBuilds.Build.PlayerClassToken()
 
@@ -865,7 +914,7 @@ function view.Show(container, context)
 
     -- Reset state
     state.step = 0
-    state.locked = { nil, nil, nil, nil }
+    state.locked = { nil, nil, nil, nil, nil }
     state.noveltyValue = 30
     state.qualityBonus = { [0] = 0, [1] = 10, [2] = 20, [3] = 30, [4] = 40 }
     state.familyPriorities = {}

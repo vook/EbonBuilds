@@ -142,7 +142,7 @@ end
 function TestScoring.testIsLocked()
     local oldGetActive = EbonBuilds.Build.GetActive
     EbonBuilds.Build.GetActive = function()
-        return { lockedEchoes = { nil, 200234, nil, nil } }
+        return { lockedEchoes = { nil, 200234, nil, nil, nil } }
     end
     EbonBuilds.BuildForm = nil
     assertTrue(EbonBuilds.Scoring.IsLocked(200234))

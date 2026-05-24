@@ -311,7 +311,7 @@ local function BuildOverviewTab(parent)
     outer._lockedHeader = lockedHeader
 
     local lockedButtons = {}
-    for i = 1, 4 do
+    for i = 1, 5 do
         local btn = CreateIconButton(outer, 36)
         btn:SetPoint("TOPLEFT", lockedHeader, "BOTTOMLEFT", (i - 1) * 42, -6)
         local border = btn:CreateTexture(nil, "BORDER")
@@ -594,7 +594,7 @@ local function RefreshOverview()
     local desc = build.comments or ""
     overviewDescText:SetText(desc)
 
-    for i = 1, 4 do
+    for i = 1, 5 do
         local btn = overviewOuter._lockedButtons[i]
         local spellId = build.lockedEchoes and build.lockedEchoes[i]
         if spellId then
