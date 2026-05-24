@@ -181,6 +181,7 @@ end
 function view.Hide()
     EbonBuildsDB._isEditingBuild = nil
     EbonBuildsDB.pendingWeights = nil
+    EbonBuildsDB._wizardPrefill = nil
     EbonBuilds.BuildForm.Unmount()
     EbonBuilds.WeightsView.Unmount()
     EbonBuilds.BonusView.Unmount()
