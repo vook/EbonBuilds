@@ -472,11 +472,12 @@ end
 ------------------------------------------------------------------------
 
 local echoRows = {}
+local RenderStep5  -- forward declaration for RenderEchoRow closure
 
-local function RenderEchoRow(entry, index, y)
-    local row = CreateFrame("Frame", nil, contentArea)
-    row:SetPoint("TOPLEFT", contentArea, "TOPLEFT", 10, y)
-    row:SetPoint("RIGHT",   contentArea, "RIGHT",   10, 0)
+local function RenderEchoRow(parent, entry, index, y)
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, y)
+    row:SetPoint("RIGHT",   parent, "RIGHT",   0, 0)
     row:SetHeight(28)
 
     local icon = row:CreateTexture(nil, "ARTWORK")
@@ -557,24 +558,32 @@ local function RenderStep5()
         end, BuildFilteredEchoList())
     end)
 
-    local rowStartY = -96
-    local count = 0
+    local sf = CreateFrame("ScrollFrame", nil, contentArea, "UIPanelScrollFrameTemplate")
+    sf:SetPoint("TOPLEFT",     contentArea, "TOPLEFT",     10, -90)
+    sf:SetPoint("BOTTOMRIGHT", contentArea, "BOTTOMRIGHT", -22,   0)
+
+    local child = CreateFrame("Frame", nil, sf)
+    child:SetWidth(1)
+    child:SetHeight(1)
+    sf:SetScrollChild(child)
+
     local sorted = {}
     for _, entry in pairs(state.echoes) do
         sorted[#sorted + 1] = entry
     end
     table.sort(sorted, function(a, b) return a.name < b.name end)
 
-    for _, entry in ipairs(sorted) do
-        count = count + 1
-        RenderEchoRow(entry, count, rowStartY - (count - 1) * 30)
-    end
-
-    if count == 0 then
+    if #sorted == 0 then
         local hint = contentArea:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         hint:SetPoint("TOP", contentArea, "TOP", 0, -96)
         hint:SetText("No echoes added yet. Click \"+ Add Echo\" to start.")
     end
+
+    child:SetWidth(contentArea:GetWidth() - 32)
+    for i, entry in ipairs(sorted) do
+        RenderEchoRow(child, entry, i, -(i - 1) * 30)
+    end
+    child:SetHeight(math.max(1, #sorted * 30))
 end
 
 ------------------------------------------------------------------------

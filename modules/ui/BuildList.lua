@@ -249,7 +249,7 @@ end
 
 local function Render()
     local builds   = EbonBuilds.Build.List()
-    local activeId = EbonBuildsDB.activeBuildId
+    local activeId = EbonBuildsCharDB.activeBuildId
     local yOffset = 0
     for i = 1, #builds do
         if not rowPool[i] then rowPool[i] = CreateRow(scrollChild) end

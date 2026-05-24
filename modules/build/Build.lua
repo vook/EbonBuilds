@@ -167,7 +167,13 @@ EbonBuilds.Build.PlayerTopTalentTab = PlayerTopTalentTab
 
 function EbonBuilds.Build.Migrate()
     EbonBuildsDB.builds        = EbonBuildsDB.builds        or {}
-    EbonBuildsDB.activeBuildId = EbonBuildsDB.activeBuildId or nil
+    EbonBuildsCharDB.activeBuildId = EbonBuildsCharDB.activeBuildId or nil
+
+    -- Migrate old per-account activeBuildId to per-character
+    if EbonBuildsDB.activeBuildId and not EbonBuildsCharDB.activeBuildId then
+        EbonBuildsCharDB.activeBuildId = EbonBuildsDB.activeBuildId
+    end
+    EbonBuildsDB.activeBuildId = nil
 
     local legacy = EbonBuildsDB.echoWeights
     if legacy and not next(EbonBuildsDB.builds) then
@@ -183,7 +189,7 @@ function EbonBuilds.Build.Migrate()
             settings        = DefaultSettings(),
             version         = 1,
         }
-        EbonBuildsDB.activeBuildId = id
+        EbonBuildsCharDB.activeBuildId = id
     end
     EbonBuildsDB.echoWeights = nil
 
@@ -213,8 +219,8 @@ function EbonBuilds.Build.MigrateIds()
         EbonBuildsDB.builds[oldId] = nil
     end
 
-    if EbonBuildsDB.activeBuildId and map[EbonBuildsDB.activeBuildId] then
-        EbonBuildsDB.activeBuildId = map[EbonBuildsDB.activeBuildId]
+    if EbonBuildsCharDB.activeBuildId and map[EbonBuildsCharDB.activeBuildId] then
+        EbonBuildsCharDB.activeBuildId = map[EbonBuildsCharDB.activeBuildId]
     end
 
     for _, build in pairs(EbonBuildsDB.builds) do
@@ -259,12 +265,12 @@ function EbonBuilds.Build.Get(id)
 end
 
 function EbonBuilds.Build.GetActive()
-    return EbonBuilds.Build.Get(EbonBuildsDB.activeBuildId)
+    return EbonBuilds.Build.Get(EbonBuildsCharDB.activeBuildId)
 end
 
 function EbonBuilds.Build.SetActive(id)
-    if EbonBuildsDB.activeBuildId == id then return end
-    EbonBuildsDB.activeBuildId = id
+    if EbonBuildsCharDB.activeBuildId == id then return end
+    EbonBuildsCharDB.activeBuildId = id
     Notify()
 end
 
@@ -385,13 +391,13 @@ function EbonBuilds.Build.Save(id, data)
             build.id = newId
             EbonBuildsDB.builds[newId] = build
             EbonBuildsDB.builds[id] = nil
-            if EbonBuildsDB.activeBuildId == id then
-                EbonBuildsDB.activeBuildId = newId
+            if EbonBuildsCharDB.activeBuildId == id then
+                EbonBuildsCharDB.activeBuildId = newId
                 Notify()
             end
         end
     end
-    if classChanged and EbonBuildsDB.activeBuildId == id then
+    if classChanged and EbonBuildsCharDB.activeBuildId == id then
         Notify()
     end
     return build
@@ -400,8 +406,8 @@ end
 function EbonBuilds.Build.Delete(id)
     if not id then return end
     EbonBuildsDB.builds[id] = nil
-    if EbonBuildsDB.activeBuildId == id then
-        EbonBuildsDB.activeBuildId = nil
+    if EbonBuildsCharDB.activeBuildId == id then
+        EbonBuildsCharDB.activeBuildId = nil
         Notify()
     end
 end

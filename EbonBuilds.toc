@@ -2,6 +2,7 @@
 ## Title: EbonBuilds
 ## Dependencies: ProjectEbonhold
 ## SavedVariables: EbonBuildsDB
+## SavedVariablesPerCharacter: EbonBuildsCharDB
 
 core/Init.lua
 modules/build/Build.lua

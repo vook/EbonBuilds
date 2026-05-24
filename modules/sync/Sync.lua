@@ -269,8 +269,6 @@ end
 local function HandleRequest(requester)
     if not requester or requester == "" or requester == UnitName("player") then return end
 
-    Log("Sync request from " .. requester)
-
     EbonBuildsDB.syncPeers = EbonBuildsDB.syncPeers or {}
     EbonBuildsDB.syncPeers[requester] = true
 
@@ -337,7 +335,6 @@ local function HandleChannelMessage(msg, sender, _, channelName, _, _, channelNu
     local parts = {strsplit("|", decoded)}
     local code = parts[1]
     if code ~= "REQ" then return end
-    Log("REQ received via channel from " .. (sender or "?"))
     local ok, err = pcall(HandleRequest, parts[2])
     if not ok then Log("HandleRequest error: " .. tostring(err)) end
 end
@@ -534,18 +531,6 @@ function EbonBuilds.Sync.RequestSync()
         VerboseLog("REQ also broadcast via GUILD")
     end
 
-    -- 3. Whisper known peers (cross-realm / cross-guild fallback)
-    EbonBuildsDB.syncPeers = EbonBuildsDB.syncPeers or {}
-    local peerCount = 0
-    for peer in pairs(EbonBuildsDB.syncPeers) do
-        if peer ~= me then
-            Enqueue(peer, payload)
-            peerCount = peerCount + 1
-        end
-    end
-    if peerCount > 0 then
-        VerboseLog("REQ whispered to " .. peerCount .. " known peer(s)")
-    end
 end
 
 function EbonBuilds.Sync.Init()
