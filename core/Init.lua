@@ -14,10 +14,13 @@ local function OnAddonLoaded(addonName)
 
     EbonBuildsDB = EbonBuildsDB or {
         builds        = {},
-        activeBuildId = nil,
         minimapAngle  = 220,
     }
     EbonBuildsDB.minimapAngle = EbonBuildsDB.minimapAngle or 220
+
+    EbonBuildsCharDB = EbonBuildsCharDB or {
+        activeBuildId = nil,
+    }
 
     EbonBuilds.Build.Migrate()
     EbonBuilds.Session.Init()

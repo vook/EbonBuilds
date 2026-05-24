@@ -153,7 +153,7 @@ function TestExportImport.testExportPreservesLockedEchoes()
     -- the JSON array roundtrips correctly.
     local build = EbonBuilds.Build.NewObject({
         title = "Test",
-        lockedEchoes = { 200234, 200235, nil, nil },
+        lockedEchoes = { 200234, 200235, nil, nil, nil },
     })
     local b64 = EbonBuilds.ExportImport.ExportBuild(build)
     local decoded = EbonBuilds.ExportImport.DecodeBuild(b64)

@@ -233,7 +233,7 @@ local function CreateCard(parent)
 
     -- Locked echo icons (below meta)
     card._lockedBtns = {}
-    for i = 1, 4 do
+    for i = 1, 5 do
         local btn = CreateIconButton(card, LOCKED_ICON_SIZE)
         btn:SetPoint("TOPLEFT", meta, "BOTTOMLEFT", (i - 1) * (LOCKED_ICON_SIZE + 4), -4)
         btn:Hide()
@@ -284,7 +284,7 @@ local function ImportBuild(build)
         class    = build.class,
         spec     = build.spec or 1,
         comments = build.comments or "",
-        lockedEchoes = build.lockedEchoes or { nil, nil, nil, nil },
+        lockedEchoes = build.lockedEchoes or { nil, nil, nil, nil, nil },
         settings = settings,
         isPublic = false,
     }
@@ -353,7 +353,7 @@ local function PopulateCard(card, build)
 
     -- Locked echo icons
     local lockeds = build.lockedEchoes
-    for i = 1, 4 do
+    for i = 1, 5 do
         local btn = card._lockedBtns[i]
         local spellId = lockeds and lockeds[i]
         if spellId then

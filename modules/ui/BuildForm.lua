@@ -39,7 +39,7 @@ local state = {
     class    = nil,
     spec     = 1,
     comments = "",
-    locked = { nil, nil, nil, nil },
+    locked = { nil, nil, nil, nil, nil },
     settings  = nil,
     isPublic  = false,
 }
@@ -222,7 +222,7 @@ local function BuildLockedSlots(parent, x, y)
     local lbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     lbl:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
     lbl:SetText("Locked Echoes:")
-    for i = 1, 4 do
+    for i = 1, 5 do
         local btn = CreateIconButton(parent, 36)
         btn:SetPoint("TOPLEFT", parent, "TOPLEFT", x + 140 + (i - 1) * 44, y + 6)
         btn._icon:SetTexture("Interface\\Buttons\\UI-EmptySlot")
@@ -464,7 +464,7 @@ local function ApplyStateToInputs()
     RefreshClassSelection()
     RefreshSpecButtons()
     publicToggle:SetText(state.isPublic and "Public" or "Make Public")
-    for i = 1, 4 do
+    for i = 1, 5 do
         local id = state.locked[i]
         local btn = slotButtons[i]
         btn.spellId = id
@@ -507,7 +507,7 @@ local function LoadFromBuild(build)
     state.comments = build.comments or ""
     state.settings = CloneSettings(build.settings)
     state.isPublic = build.isPublic or false
-    for i = 1, 4 do state.locked[i] = build.lockedEchoes and build.lockedEchoes[i] or nil end
+    for i = 1, 5 do state.locked[i] = build.lockedEchoes and build.lockedEchoes[i] or nil end
     EbonBuildsDB._isEditingBuild = true
     EbonBuildsDB.pendingWeights = {}
     if build.echoWeights then
@@ -526,7 +526,7 @@ local function LoadDefaults()
     state.comments = ""
     state.settings = EbonBuilds.Build.DefaultSettings()
     state.isPublic = false
-    for i = 1, 4 do state.locked[i] = nil end
+    for i = 1, 5 do state.locked[i] = nil end
     EbonBuildsDB._isEditingBuild = true
     EbonBuildsDB.pendingWeights = {}
     EbonBuildsDB._wizardPrefill = nil
@@ -542,7 +542,7 @@ local function LoadFromWizardPrefill()
     state.comments = pre.comments or ""
     state.settings = pre.settings or EbonBuilds.Build.DefaultSettings()
     state.isPublic = pre.isPublic or false
-    for i = 1, 4 do state.locked[i] = (pre.lockedEchoes and pre.lockedEchoes[i]) or nil end
+    for i = 1, 5 do state.locked[i] = (pre.lockedEchoes and pre.lockedEchoes[i]) or nil end
     EbonBuildsDB._isEditingBuild = true
     EbonBuildsDB.pendingWeights = EbonBuildsDB.pendingWeights or {}
 end

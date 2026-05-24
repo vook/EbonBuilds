@@ -117,8 +117,6 @@ function EbonBuilds.MainWindow._ShowInitialView()
     local active = EbonBuilds.Build.GetActive()
     if active then
         EbonBuilds.ViewRouter.Show("buildOverview", { build = active })
-    elseif #EbonBuilds.Build.List() > 0 then
-        EbonBuilds.ViewRouter.Show("buildTabs", { mode = "create" })
     else
         EbonBuilds.ViewRouter.Show("welcome")
     end
