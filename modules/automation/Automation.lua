@@ -21,8 +21,9 @@ local evalTimerElapsed  = 0
 local evalTimerActive   = false
 local pendingChoices    = nil
 local origPerkUIShow    = nil
-local freezeRoundActive = false  -- true after freeze batch, cleared on select
-local cachedPeak        = nil    -- locked at first evaluation of the run
+local freezeRoundActive    = false  -- true after freeze batch, cleared on select
+local locallyFrozenIndices = {}     -- indices frozen this round, for penalty tracking
+local cachedPeak           = nil    -- locked at first evaluation of the run
 
 ------------------------------------------------------------------------
 -- Internal helpers
@@ -312,15 +313,36 @@ function EbonBuilds.Automation.Evaluate()
     end
 
     --------------------------------------------------------------------
+    --------------------------------------------------------------------
     -- 3. TRY FREEZE
     --------------------------------------------------------------------
-    if not freezeRoundActive and runData and (runData.totalFreezes or 0) - (runData.usedFreezes or 0) > 0 then
+    -- Freeze one echo per evaluation so the server has time to confirm
+    -- each freeze before the next one.  The timer re-invokes Evaluate()
+    -- which scores fresh (reflecting isFrozen / isCarried state) and
+    -- applies the penalty to locally-frozen echoes so their scores
+    -- degrade toward the eventual pick.
+    if runData and (runData.totalFreezes or 0) - (runData.usedFreezes or 0) > 0 then
+        local penalty = (settings.freezePenaltyPct or 0) / 100
+
+        -- Apply freeze penalty to echoes we already froze this round
+        -- so they are deprioritised in subsequent evaluations.
+        -- Only applied when the server hasn't confirmed isFrozen yet;
+        -- ScoreChoice already handles the penalty once isFrozen is true.
+        if penalty > 0 then
+            for _, s in ipairs(scored) do
+                if locallyFrozenIndices[s.index] and not s.isFrozen then
+                    s.score = math.floor(s.score * (1 - penalty))
+                end
+            end
+        end
+
         local threshold = math.floor(peakScore * settings.autoFreezePct / 100)
 
-        -- Offered choices above freeze threshold
+        -- Offered choices above freeze threshold, excluding echoes that
+        -- are already frozen (server), carried, or locally frozen this round.
         local aboveChoices = {}
         for _, s in ipairs(scored) do
-            if not s.isFrozen and not s.isCarried and s.score > threshold then
+            if not s.isFrozen and not s.isCarried and not locallyFrozenIndices[s.index] and s.score > threshold then
                 aboveChoices[#aboveChoices + 1] = s
             end
         end
@@ -335,31 +357,25 @@ function EbonBuilds.Automation.Evaluate()
         end
 
         -- Requires at least 2 offered echoes above threshold so we can
-        -- freeze the lower-scored ones and select a different highest one.
+        -- freeze the lowest and select a different highest one.
         if (#aboveChoices + lockedAbove) >= 2 and #aboveChoices >= 2 then
             table.sort(aboveChoices, function(a, b) return a.score > b.score end)
 
-            -- Freeze lower-scored echoes first; highest will be selected after delay
-            local freezesAvailable = (runData.totalFreezes or 0) - (runData.usedFreezes or 0)
-            local penalty = (settings.freezePenaltyPct or 0) / 100
-            local anyFrozen = false
+            -- Freeze the single lowest-scored echo above the threshold.
+            -- (Multiple would race the server; one-per-eval is reliable.)
+            local lowest = aboveChoices[#aboveChoices]
+            local ok = ProjectEbonhold.PerkService.FreezePerk(lowest.index - 1)
+            if ok then
+                UpdateStat(build, "freezesUsed")
+                locallyFrozenIndices[lowest.index] = true
 
-            for i = #aboveChoices, 2, -1 do
-                if freezesAvailable <= 0 then break end
-                local target = aboveChoices[i]
-                local ok = ProjectEbonhold.PerkService.FreezePerk(target.index - 1)
-                if ok then
-                    UpdateStat(build, "freezesUsed")
-                    freezesAvailable = freezesAvailable - 1
-                    anyFrozen = true
-                    if penalty > 0 then
-                        target.score = target.score * (1 - penalty)
-                    end
-                    LogAndToast(scored, "Freeze", target.index)
+                -- Optimistically update runData so the toast and session log
+                -- reflect the correct remaining freeze count immediately.
+                if runData and runData.usedFreezes ~= nil then
+                    runData.usedFreezes = runData.usedFreezes + 1
                 end
-            end
 
-            if anyFrozen then
+                LogAndToast(scored, "Freeze", lowest.index)
                 freezeRoundActive = true
                 StartEvalTimer()
                 return true
@@ -370,12 +386,11 @@ function EbonBuilds.Automation.Evaluate()
     --------------------------------------------------------------------
     -- 4. SELECT (fallback)
     --------------------------------------------------------------------
+    locallyFrozenIndices = {}
+    freezeRoundActive = false
     local ok, pick = TrySelect(scored, settings, build)
     if ok and pick then
-        freezeRoundActive = false
         LogAndToast(scored, "Select", pick.index)
-    else
-        freezeRoundActive = false
     end
     return ok
 end
@@ -411,7 +426,11 @@ function EbonBuilds.Automation.Init()
 end
 
 -- Exported for unit testing
-EbonBuilds.Automation._ScoreChoice     = ScoreChoice
-EbonBuilds.Automation._TrySelect       = TrySelect
-EbonBuilds.Automation._AnnotateScored  = AnnotateScored
-EbonBuilds.Automation._IsProtected     = IsProtected
+EbonBuilds.Automation._ScoreChoice       = ScoreChoice
+EbonBuilds.Automation._TrySelect         = TrySelect
+EbonBuilds.Automation._AnnotateScored    = AnnotateScored
+EbonBuilds.Automation._IsProtected       = IsProtected
+EbonBuilds.Automation._ResetFreezeRound  = function()
+    freezeRoundActive = false
+    locallyFrozenIndices = {}
+end
