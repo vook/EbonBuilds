@@ -14,7 +14,9 @@ local FAMILY_MAP = {
     None   = "No family",
 }
 
-local EVAL_DELAY = 2  -- seconds before evaluating (TODO: make configurable)
+local function GetEvalDelay()
+    return (EbonBuildsDB.globalSettings and EbonBuildsDB.globalSettings.evalDelay) or 2
+end
 
 local evalTimerFrame    = nil
 local evalTimerElapsed  = 0
@@ -34,7 +36,7 @@ local function StartEvalTimer()
         evalTimerFrame = CreateFrame("Frame")
         evalTimerFrame:SetScript("OnUpdate", function(self, dt)
             evalTimerElapsed = evalTimerElapsed + dt
-            if evalTimerElapsed >= EVAL_DELAY then
+            if evalTimerElapsed >= GetEvalDelay() then
                 evalTimerActive = false
                 evalTimerFrame:Hide()
                 if EbonBuilds.Automation.Evaluate() then

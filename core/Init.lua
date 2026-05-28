@@ -15,8 +15,15 @@ local function OnAddonLoaded(addonName)
     EbonBuildsDB = EbonBuildsDB or {
         builds        = {},
         minimapAngle  = 220,
+        globalSettings = {
+            evalDelay     = 2,
+            toastDuration = 3,
+        },
     }
     EbonBuildsDB.minimapAngle = EbonBuildsDB.minimapAngle or 220
+    EbonBuildsDB.globalSettings = EbonBuildsDB.globalSettings or {}
+    EbonBuildsDB.globalSettings.evalDelay     = EbonBuildsDB.globalSettings.evalDelay     or 2
+    EbonBuildsDB.globalSettings.toastDuration = EbonBuildsDB.globalSettings.toastDuration or 3
 
     EbonBuildsCharDB = EbonBuildsCharDB or {
         activeBuildId = nil,
