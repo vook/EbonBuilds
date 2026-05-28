@@ -8,7 +8,9 @@ EbonBuilds.Toast = {}
 
 local TOAST_W  = 520
 local TOAST_H  = 72
-local DURATION = 3
+local function GetToastDuration()
+    return (EbonBuildsDB.globalSettings and EbonBuildsDB.globalSettings.toastDuration) or 3
+end
 local QUALITY_HEX = { [0]="ffffff", [1]="19ff19", [2]="0066ff", [3]="cc66ff", [4]="ff8000" }
 
 local queue   = {}
@@ -194,7 +196,7 @@ local function BuildFrame()
             return
         end
         elapsed = elapsed + dt
-        if elapsed >= DURATION then
+        if elapsed >= GetToastDuration() then
             DismissCurrent()
         end
     end)

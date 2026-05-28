@@ -363,13 +363,13 @@ local function BuildOverviewTab(parent)
     descHeader:SetText("Description:")
     outer._descHeader = descHeader
 
-    -- Description with its own scroll frame
+    -- Description scroll frame (owns scrollbar)
     local descScroll = CreateFrame("ScrollFrame", nil, outer)
     descScroll:SetPoint("TOPLEFT",     descHeader, "BOTTOMLEFT", 0, -4)
     descScroll:SetPoint("BOTTOMRIGHT", outer,      "BOTTOMRIGHT", -22, 28)
 
     local descChild = CreateFrame("Frame", nil, descScroll)
-    descChild:SetWidth(420)
+    descChild:SetWidth(416)
     descChild:SetHeight(1)
     descScroll:SetScrollChild(descChild)
 
@@ -377,10 +377,41 @@ local function BuildOverviewTab(parent)
     descBar:SetPoint("TOPLEFT",    descScroll, "TOPRIGHT",    -2, -4)
     descBar:SetPoint("BOTTOMLEFT", descScroll, "BOTTOMRIGHT", -2,  4)
     descBar:SetValueStep(20)
-
     descBar:SetScript("OnValueChanged", function(self, value)
         descChild:SetPoint("TOPLEFT", descScroll, "TOPLEFT", 0, value)
     end)
+
+    -- SMF inside scroll child -- renders text with hyperlink tooltip support
+    local descSmf = CreateFrame("ScrollingMessageFrame", nil, descChild)
+    descSmf:SetPoint("TOPLEFT", descChild, "TOPLEFT", 0, -2)
+    descSmf:SetWidth(416)
+    descSmf:SetFontObject("GameFontNormalSmall")
+    descSmf:SetJustifyH("LEFT")
+    descSmf:SetFading(false)
+    descSmf:SetInsertMode("TOP")
+    descSmf:SetMaxLines(500)
+    descSmf:SetHyperlinksEnabled(true)
+    descSmf:EnableMouse(true)
+    descSmf:EnableMouseWheel(false)
+    descSmf:SetScript("OnHyperlinkEnter", function(self, link)
+        GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+        GameTooltip:SetHyperlink(link)
+        GameTooltip:Show()
+    end)
+    descSmf:SetScript("OnHyperlinkLeave", function()
+        GameTooltip:Hide()
+    end)
+    descSmf:SetScript("OnMouseWheel", function(self, delta)
+        local v = descBar:GetValue()
+        local mn, mx = descBar:GetMinMaxValues()
+        descBar:SetValue(math.max(mn, math.min(mx, v - delta * 20)))
+    end)
+
+    -- Hidden FontString with same width -- used only to measure wrapped text height
+    local descMeasure = descChild:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    descMeasure:SetWidth(416)
+    descMeasure:Hide()
+
     descScroll:EnableMouseWheel(true)
     descScroll:SetScript("OnMouseWheel", function(self, delta)
         local v = descBar:GetValue()
@@ -388,13 +419,8 @@ local function BuildOverviewTab(parent)
         descBar:SetValue(math.max(mn, math.min(mx, v - delta * 20)))
     end)
 
-    local descText = descChild:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    descText:SetPoint("TOPLEFT",     descChild, "TOPLEFT",  0, -2)
-    descText:SetPoint("RIGHT",       descChild, "RIGHT",   -2,  0)
-    descText:SetJustifyH("LEFT")
-    descText:SetJustifyV("TOP")
-    descText:SetTextColor(0.8, 0.8, 0.8, 1)
-    outer._descText = descText
+    outer._descSmf = descSmf
+    outer._descMeasure = descMeasure
     outer._descScroll = descScroll
     outer._descChild  = descChild
     outer._descBar    = descBar
@@ -413,7 +439,7 @@ local function BuildOverviewTab(parent)
     end)
     outer._deleteBtn = deleteBtn
 
-    return outer, descText, descScroll, descChild, descBar
+    return outer, descSmf, descMeasure, descScroll, descChild, descBar
 end
 
 ------------------------------------------------------------------------
@@ -557,7 +583,7 @@ end
 ------------------------------------------------------------------------
 
 local overviewOuter
-local overviewDescText, overviewDescScroll, overviewDescChild, overviewDescBar
+local overviewDescSmf, overviewDescMeasure, overviewDescScroll, overviewDescChild, overviewDescBar
 local statsValueLabels, statsQualityLabels
 local missingScroll, missingChild, missingBar
 local missingRows = {}
@@ -592,7 +618,9 @@ local function RefreshOverview()
     overviewOuter._autoToggle:SetText(build.automationEnabled and "Automation: ON" or "Automation: OFF")
 
     local desc = build.comments or ""
-    overviewDescText:SetText(desc)
+    overviewDescSmf:Clear()
+    overviewDescSmf:AddMessage(desc, 0.8, 0.8, 0.8, 1.0)
+    overviewDescMeasure:SetText(desc)
 
     for i = 1, 5 do
         local btn = overviewOuter._lockedButtons[i]
@@ -615,8 +643,9 @@ local function RefreshOverview()
     end
 
     -- Adjust description scroll range
-    local textHeight = overviewDescText:GetStringHeight() or 0
-    overviewDescChild:SetHeight(math.max(textHeight + 4, overviewDescScroll:GetHeight()))
+    local textHeight = overviewDescMeasure:GetStringHeight() or 0
+    overviewDescSmf:SetHeight(math.max(textHeight + 4, 14))
+    overviewDescChild:SetHeight(math.max(textHeight + 6, overviewDescScroll:GetHeight()))
     overviewDescBar:SetMinMaxValues(0, math.max(0, overviewDescChild:GetHeight() - overviewDescScroll:GetHeight()))
 end
 
@@ -772,7 +801,7 @@ local function BuildViewFrame()
     contentArea:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -6,  6)
 
     -- Build Overview tab content
-    overviewOuter, overviewDescText, overviewDescScroll, overviewDescChild, overviewDescBar = BuildOverviewTab(contentArea)
+    overviewOuter, overviewDescSmf, overviewDescMeasure, overviewDescScroll, overviewDescChild, overviewDescBar = BuildOverviewTab(contentArea)
 
     -- Build Stats tab content (hidden by default)
     local statsParent = CreateFrame("Frame", nil, contentArea)
