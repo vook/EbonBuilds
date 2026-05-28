@@ -454,10 +454,22 @@ local function OnSave()
     end
 end
 
+local LoadFromBuild, ApplyStateToInputs
+
 local function OnCancel()
     EbonBuildsDB._isEditingBuild = nil
     EbonBuildsDB.pendingWeights = nil
     EbonBuildsDB._wizardPrefill = nil
+
+    -- Revert state and inputs to original build so dirty edits don't survive Cancel
+    if state.mode == "edit" and state.id then
+        local build = EbonBuilds.Build.Get(state.id)
+        if build then
+            LoadFromBuild(build)
+            ApplyStateToInputs()
+        end
+    end
+
     local active = EbonBuilds.Build.GetActive()
     if active then
         EbonBuilds.ViewRouter.Show("buildOverview", { build = active })
@@ -491,7 +503,7 @@ EbonBuilds.BuildForm.Delete = OnDelete
 -- Load/Reset state
 ------------------------------------------------------------------------
 
-local function ApplyStateToInputs()
+ApplyStateToInputs = function()
     titleBox:SetText(state.title or "")
     commentsBox:SetText(state.comments or "")
     RefreshDescriptionPlaceholder()
@@ -532,7 +544,7 @@ local function CloneSettings(src)
     return dst
 end
 
-local function LoadFromBuild(build)
+LoadFromBuild = function(build)
     state.mode     = "edit"
     state.id       = build.id
     state.title    = build.title    or ""
