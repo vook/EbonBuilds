@@ -47,7 +47,7 @@ local echoBanFrame
 local echoBanScroll, echoBanScrollChild, echoBanScrollBar
 local echoBanAllButton
 
-local CONTENT_HEIGHT = 800
+local CONTENT_HEIGHT = 900
 
 local function CreateModeToggle(parent, x, y)
     local btn = CreateFrame("Button", nil, parent)
