@@ -20,10 +20,18 @@ local FAMILY_ORDER = {
 }
 
 local THRESHOLDS = {
-    { key = "autoBanishPct",    label = "Auto-banish %",   hint = "Banish echoes below this % of peak.",       min = 0, max = 100, step = 1 },
-    { key = "autoRerollPct",    label = "Auto-reroll %",   hint = "Reroll when best offered is below this %.", min = 0, max = 300, step = 1 },
-    { key = "autoFreezePct",    label = "Auto-freeze %",   hint = "Freeze echoes above this % of peak.",       min = 0, max = 100, step = 1 },
-    { key = "freezePenaltyPct", label = "Freeze penalty %", hint = "Score penalty applied to frozen echoes.",  min = 0, max = 50,  step = 1 },
+    { key = "autoBanishPct",    label = "Auto-banish %",
+      flavor = "When an offered echo's individual score falls below this threshold, the addon will try to banish it. Echoes from protected families are skipped.",
+      min = 0, max = 100, step = 1 },
+    { key = "autoRerollPct",    label = "Auto-reroll %",
+      flavor = "The addon sums the scores of all three offered echoes. If the total is below this threshold, a reroll is triggered.",
+      min = 0, max = 300, step = 1 },
+    { key = "autoFreezePct",    label = "Auto-freeze %",
+      flavor = "Triggers when at least two offered echoes score above this threshold. The lowest-scored among them gets frozen, and the highest will be picked afterwards.",
+      min = 0, max = 100, step = 1 },
+    { key = "freezePenaltyPct", label = "Freeze penalty %",
+      flavor = "Reduces a frozen echo's score to give priority to unpicked choices. The penalty is applied once and persists until the echo is selected.",
+      min = 0, max = 50,  step = 1 },
 }
 
 local viewFrame
@@ -39,7 +47,7 @@ local echoBanFrame
 local echoBanScroll, echoBanScrollChild, echoBanScrollBar
 local echoBanAllButton
 
-local CONTENT_HEIGHT = 600
+local CONTENT_HEIGHT = 800
 
 local function CreateModeToggle(parent, x, y)
     local btn = CreateFrame("Button", nil, parent)
@@ -195,6 +203,12 @@ local function BuildBanishWhitelistSection(parent, x, y)
     whitelistWarningLabel:SetJustifyH("LEFT")
     whitelistWarningLabel:SetText("|cffff0000All families are protected. At least one must be unprotected for banish to work.|r")
     whitelistWarningLabel:Hide()
+
+    local banNote = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    banNote:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y - 115)
+    banNote:SetWidth(490)
+    banNote:SetJustifyH("LEFT")
+    banNote:SetText("Banned echoes with protected families are deprioritized, not excluded from selection. If all offered are banned, the fallback are applied.")
 end
 
 ------------------------------------------------------------------------
@@ -212,7 +226,8 @@ local QUALITY_BORDER_COLORS = {
 local ICON_SIZE  = 28
 local ICON_GAP   = 4
 local ICON_STEP  = ICON_SIZE + ICON_GAP
-local BAN_LIST_W = 380
+local BAN_LIST_W = 500
+local BAN_LIST_PADDING = 4
 
 local function RefreshBanList()
     if not echoBanFrame then return end
@@ -222,7 +237,7 @@ local function RefreshBanList()
 
     local settings = EbonBuilds.BuildForm.GetEditingSettings()
     local banList = settings.echoBanList or {}
-    local cols = math.floor(BAN_LIST_W / ICON_STEP)
+    local cols = math.floor((BAN_LIST_W - BAN_LIST_PADDING) / ICON_STEP)
     local idx = 0
 
     for spellId, echoName in pairs(banList) do
@@ -285,7 +300,7 @@ local function RefreshBanList()
         btn._border:Show()
         local col = (idx - 1) % cols
         local row = math.floor((idx - 1) / cols)
-        btn:SetPoint("TOPLEFT", echoBanScrollChild, "TOPLEFT", col * ICON_STEP, -row * ICON_STEP)
+        btn:SetPoint("TOPLEFT", echoBanScrollChild, "TOPLEFT", BAN_LIST_PADDING + col * ICON_STEP, -BAN_LIST_PADDING - row * ICON_STEP)
         btn:Show()
     end
 
@@ -294,6 +309,11 @@ local function RefreshBanList()
     echoBanScrollChild:SetHeight(contentHeight)
     local range = math.max(0, contentHeight - echoBanFrame:GetHeight())
     echoBanScrollBar:SetMinMaxValues(0, range)
+    if range > 0 then
+        echoBanScroll:EnableMouseWheel(true)
+    else
+        echoBanScroll:EnableMouseWheel(false)
+    end
 
     if idx == 0 then
         echoBanFrame._emptyLabel:Show()
@@ -315,13 +335,13 @@ local function BuildEchoBanSection(parent, x, y)
     header:SetText("Echo Ban:")
 
     local hint = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    hint:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -2)
+    hint:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -4)
     hint:SetText("Echoes listed here get max banish priority and ignore scores.")
 
     local addBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     addBtn:SetWidth(90)
     addBtn:SetHeight(20)
-    addBtn:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y - 24)
+    addBtn:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y - 30)
     addBtn:SetText("Add Echo")
     addBtn:SetScript("OnClick", function()
         local allList = EbonBuilds.EchoTableRows.BuildAllQualitiesList()
@@ -339,29 +359,29 @@ local function BuildEchoBanSection(parent, x, y)
     end)
 
     local listFrame = CreateFrame("Frame", nil, parent)
-    listFrame:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y - 50)
+    listFrame:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y - 56)
     listFrame:SetWidth(BAN_LIST_W)
-    listFrame:SetHeight(80)
+    listFrame:SetHeight(120)
 
     echoBanScroll = CreateFrame("ScrollFrame", nil, listFrame)
     echoBanScroll:SetPoint("TOPLEFT",     listFrame, "TOPLEFT",     0, 0)
-    echoBanScroll:SetPoint("BOTTOMRIGHT", listFrame, "BOTTOMRIGHT", -16, 0)
+    echoBanScroll:SetPoint("BOTTOMRIGHT", listFrame, "BOTTOMRIGHT", 0, 0)
 
     echoBanScrollChild = CreateFrame("Frame", nil, echoBanScroll)
     echoBanScrollChild:SetWidth(BAN_LIST_W)
-    echoBanScrollChild:SetHeight(80)
+    echoBanScrollChild:SetHeight(120)
     echoBanScroll:SetScrollChild(echoBanScrollChild)
 
-    echoBanScrollBar = CreateFrame("Slider", nil, echoBanScroll, "UIPanelScrollBarTemplate")
-    echoBanScrollBar:SetPoint("TOPLEFT",     echoBanScroll, "TOPRIGHT",     -14, -2)
-    echoBanScrollBar:SetPoint("BOTTOMLEFT",  echoBanScroll, "BOTTOMRIGHT",  -14,  2)
+    echoBanScrollBar = CreateFrame("Slider", nil, listFrame, "UIPanelScrollBarTemplate")
+    echoBanScrollBar:SetPoint("TOPLEFT",     listFrame, "TOPRIGHT",     0, -2)
+    echoBanScrollBar:SetPoint("BOTTOMLEFT",  listFrame, "BOTTOMRIGHT",  0,  2)
     echoBanScrollBar:SetValueStep(ICON_STEP)
     echoBanScrollBar:SetValue(0)
     echoBanScrollBar:SetScript("OnValueChanged", function(self, value)
         echoBanScrollChild:SetPoint("TOPLEFT", echoBanScroll, "TOPLEFT", 0, value)
     end)
 
-    echoBanScroll:EnableMouseWheel(true)
+    echoBanScroll:EnableMouseWheel(false)
     echoBanScroll:SetScript("OnMouseWheel", function(self, delta)
         local current  = echoBanScrollBar:GetValue()
         local min, max = echoBanScrollBar:GetMinMaxValues()
@@ -375,14 +395,8 @@ local function BuildEchoBanSection(parent, x, y)
 
     echoBanFrame = listFrame
 
-    local note = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    note:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y - 138)
-    note:SetWidth(490)
-    note:SetJustifyH("LEFT")
-    note:SetText("Banned echoes with protected families are deprioritized, not excluded from selection. If all offered are banned, the fallback below applies.")
-
     local allLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    allLabel:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y - 170)
+    allLabel:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y - 190)
     allLabel:SetWidth(300)
     allLabel:SetJustifyH("LEFT")
     allLabel:SetText("When all offered are banned and no charges left:")
@@ -390,7 +404,7 @@ local function BuildEchoBanSection(parent, x, y)
     echoBanAllButton = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     echoBanAllButton:SetWidth(110)
     echoBanAllButton:SetHeight(20)
-    echoBanAllButton:SetPoint("TOPLEFT", parent, "TOPLEFT", x + 310, y - 165)
+    echoBanAllButton:SetPoint("TOPLEFT", parent, "TOPLEFT", x + 310, y - 185)
     echoBanAllButton:SetText("Highest Score")
     echoBanAllButton._value = "highestScore"
     echoBanAllButton:SetScript("OnClick", function(self)
@@ -417,7 +431,9 @@ local function BuildPeakRow(parent, x, y)
 
     local note = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     note:SetPoint("TOPLEFT", peakLabel, "BOTTOMLEFT", 0, -2)
-    note:SetText("Peak includes the novelty bonus. Locked at run start.")
+    note:SetWidth(480)
+    note:SetJustifyH("LEFT")
+    note:SetText("The highest echo score for this class after all bonuses are applied. All automation thresholds are percentages of this value. Locked at run start.")
 end
 
 ------------------------------------------------------------------------
@@ -431,8 +447,18 @@ local function CreateThresholdSlider(parent, x, y, entry)
     lbl:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
     lbl:SetText(entry.label)
 
+    local flavorY = y - 20
+    if entry.flavor then
+        local flavor = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        flavor:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y - 16)
+        flavor:SetWidth(SLIDER_W)
+        flavor:SetJustifyH("LEFT")
+        flavor:SetText(entry.flavor)
+        flavorY = y - 58
+    end
+
     local slider = CreateFrame("Slider", nil, parent)
-    slider:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y - 20)
+    slider:SetPoint("TOPLEFT", parent, "TOPLEFT", x, flavorY)
     slider:SetWidth(SLIDER_W)
     slider:SetHeight(24)
     slider:SetOrientation("HORIZONTAL")
@@ -467,12 +493,6 @@ local function CreateThresholdSlider(parent, x, y, entry)
     end
     slider._absLabel = absLabel
 
-    local hint = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    hint:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", 0, -4)
-    hint:SetWidth(SLIDER_W)
-    hint:SetJustifyH("LEFT")
-    hint:SetText(entry.hint)
-
     slider:SetScript("OnValueChanged", function(self, value)
         local v = math.floor(value + 0.5)
         valText:SetText(v .. "%")
@@ -503,7 +523,7 @@ local function BuildThresholdsSection(parent, x, y)
     sub:SetText("Values are percentages of the Peak score.")
 
     for i, entry in ipairs(THRESHOLDS) do
-        local cy = y - 38 - (i - 1) * 60
+        local cy = y - 38 - (i - 1) * 85
         local slider = CreateThresholdSlider(parent, x + 10, cy, entry)
         thresholdSliders[entry.key] = slider
     end
@@ -599,9 +619,9 @@ local function BuildViewFrame(parent)
     scrollFrame:SetScript("OnSizeChanged", UpdateScrollRange)
 
     BuildBanishWhitelistSection (scrollChild, 10,  -5)
-    BuildEchoBanSection         (scrollChild, 10, -100)
-    BuildPeakRow                (scrollChild, 10, -295)
-    BuildThresholdsSection      (scrollChild, 10, -325)
+    BuildEchoBanSection         (scrollChild, 10, -150)
+    BuildPeakRow                (scrollChild, 10, -390)
+    BuildThresholdsSection      (scrollChild, 10, -440)
 
     return f
 end
