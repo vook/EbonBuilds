@@ -343,6 +343,12 @@ local function BuildDescriptionField(parent, x, y, height)
     scroll:SetScrollChild(box)
     commentsBox = box
 
+    -- Hidden FontString used to measure wrapped text height for scroll range
+    local descMeasure = box:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    descMeasure:SetFont("Fonts\\FRIZQT__.TTF", 12, "")
+    descMeasure:SetWidth(410)
+    descMeasure:Hide()
+
     local hint = box:CreateFontString(nil, "OVERLAY", "GameFontDisable")
     hint:SetPoint("TOPLEFT",  box, "TOPLEFT",   2, -2)
     hint:SetPoint("TOPRIGHT", box, "TOPRIGHT", -2, -2)
@@ -364,6 +370,34 @@ local function BuildDescriptionField(parent, x, y, height)
                 descriptionPlaceholder:Show()
             else
                 descriptionPlaceholder:Hide()
+            end
+        end
+
+        -- Auto-resize to fit content and track cursor visibility
+        descMeasure:SetText(self:GetText() or "")
+        local textHeight = descMeasure:GetStringHeight() or 0
+        local contentH = math.max(textHeight + 10, scroll:GetHeight())
+        self:SetHeight(contentH)
+
+        local sbar = _G["EbonBuildsBuildFormDescriptionSFScrollBar"]
+        if sbar then
+            local maxScroll = math.max(0, contentH - scroll:GetHeight())
+            sbar:SetMinMaxValues(0, maxScroll)
+
+            -- Measure cursor Y position within the text
+            local cursorByte = self:GetCursorPosition() or 0
+            local textBefore = (self:GetText() or ""):sub(1, cursorByte)
+            descMeasure:SetText(textBefore)
+            local cursorY = descMeasure:GetStringHeight() or 0
+
+            local scrollTop = sbar:GetValue() or 0
+            local visibleH = scroll:GetHeight()
+            local cursorScreenY = cursorY - scrollTop
+
+            if cursorScreenY > visibleH - 20 then
+                sbar:SetValue(math.min(maxScroll, cursorY - visibleH + 20))
+            elseif cursorScreenY < 4 then
+                sbar:SetValue(math.max(0, cursorY - 20))
             end
         end
     end)
