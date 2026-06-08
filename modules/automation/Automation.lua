@@ -302,14 +302,28 @@ function EbonBuilds.Automation.Evaluate()
     -- 2. TRY REROLL
     --------------------------------------------------------------------
     if runData and (runData.totalRerolls or 0) - (runData.usedRerolls or 0) > 0 then
-        local sum = 0
-        for _, s in ipairs(scored) do sum = sum + s.score end
-        if sum < peakScore * settings.autoRerollPct / 100 then
-            local ok = ProjectEbonhold.PerkService.RequestReroll()
-            if ok then
-                UpdateStat(build, "rerollsUsed")
-                LogAndToast(scored, "Reroll", 0)
-                return true
+        -- Reroll guard: skip if any single echo is above the guard threshold,
+        -- regardless of the sum. Prevents rerolling when one good echo is
+        -- offered alongside weak ones.
+        local guardPct = settings.rerollGuardPct or 90
+        local guardThreshold = math.floor(peakScore * guardPct / 100)
+        local blockedByGuard = false
+        for _, s in ipairs(scored) do
+            if s.score >= guardThreshold then
+                blockedByGuard = true
+                break
+            end
+        end
+        if not blockedByGuard then
+            local sum = 0
+            for _, s in ipairs(scored) do sum = sum + s.score end
+            if sum < peakScore * settings.autoRerollPct / 100 then
+                local ok = ProjectEbonhold.PerkService.RequestReroll()
+                if ok then
+                    UpdateStat(build, "rerollsUsed")
+                    LogAndToast(scored, "Reroll", 0)
+                    return true
+                end
             end
         end
     end

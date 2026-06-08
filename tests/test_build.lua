@@ -36,6 +36,7 @@ function TestBuild.testDefaultSettingsThresholds()
     local s = EbonBuilds.Build.DefaultSettings()
     assertEquals(s.autoBanishPct, 20)
     assertEquals(s.autoRerollPct, 120)
+    assertEquals(s.rerollGuardPct, 90)
     assertEquals(s.autoFreezePct, 80)
     assertEquals(s.freezePenaltyPct, 10)
 end

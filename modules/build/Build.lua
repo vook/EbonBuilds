@@ -15,6 +15,7 @@ local function DefaultSettings()
         banishFamilyWhitelist = {},
         autoBanishPct    = 20,
         autoRerollPct    = 120,
+        rerollGuardPct   = 90,
         autoFreezePct    = 80,
         freezePenaltyPct = 10,
         noveltyValue     = 0,
