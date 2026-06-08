@@ -26,6 +26,9 @@ local THRESHOLDS = {
     { key = "autoRerollPct",    label = "Auto-reroll %",
       flavor = "The addon sums the scores of all three offered echoes. If the total is below this threshold, a reroll is triggered.",
       min = 0, max = 300, step = 1 },
+    { key = "rerollGuardPct",   label = "Reroll guard %",
+      flavor = "Blocks reroll if any single offered echo scores above this threshold, regardless of the sum.",
+      min = 0, max = 100, step = 1 },
     { key = "autoFreezePct",    label = "Auto-freeze %",
       flavor = "Triggers when at least two offered echoes score above this threshold. The lowest-scored among them gets frozen, and the highest will be picked afterwards.",
       min = 0, max = 100, step = 1 },
@@ -47,7 +50,7 @@ local echoBanFrame
 local echoBanScroll, echoBanScrollChild, echoBanScrollBar
 local echoBanAllButton
 
-local CONTENT_HEIGHT = 900
+local CONTENT_HEIGHT = 960
 
 local function CreateModeToggle(parent, x, y)
     local btn = CreateFrame("Button", nil, parent)
