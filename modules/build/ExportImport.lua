@@ -149,6 +149,7 @@ local function ParseValue(s, pos)
 		pos = SkipWhitespace(s, pos)
 		if s:byte(pos) == 93 then return arr, pos + 1 end
 		while true do
+			if pos > #s then return arr, pos end
 			local val
 			val, pos = ParseValue(s, pos)
 			arr[#arr + 1] = val
@@ -162,6 +163,7 @@ local function ParseValue(s, pos)
 		pos = SkipWhitespace(s, pos)
 		if s:byte(pos) == 125 then return obj, pos + 1 end
 		while true do
+			if pos > #s then return obj, pos end
 			local key
 			key, pos = ParseValue(s, pos)
 			pos = SkipWhitespace(s, pos)
