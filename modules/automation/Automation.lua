@@ -27,6 +27,13 @@ local freezeRoundActive    = false  -- true after freeze batch, cleared on selec
 local locallyFrozenIndices = {}     -- indices frozen this round, for penalty tracking
 local cachedPeak           = nil    -- locked at first evaluation of the run
 
+local MAX_LEVEL_SHUTDOWN_DELAY = 20  -- seconds of inactivity after level 80 before disabling
+local maxLevelReached          = false
+local maxLevelShutdownFrame    = nil
+local maxLevelShutdownElapsed  = 0
+local maxLevelEventFrame       = nil
+local wasAutoDisabled          = false  -- true when the shutdown timer (not the user) disabled automation
+
 ------------------------------------------------------------------------
 -- Internal helpers
 ------------------------------------------------------------------------
@@ -54,6 +61,29 @@ local function StartEvalTimer()
     evalTimerElapsed = 0
     evalTimerActive = true
     evalTimerFrame:Show()
+end
+
+local function StartMaxLevelShutdownTimer()
+    if not maxLevelShutdownFrame then
+        maxLevelShutdownFrame = CreateFrame("Frame")
+        maxLevelShutdownFrame:SetScript("OnUpdate", function(self, dt)
+            maxLevelShutdownElapsed = maxLevelShutdownElapsed + dt
+            if maxLevelShutdownElapsed >= MAX_LEVEL_SHUTDOWN_DELAY then
+                self:Hide()
+                maxLevelShutdownElapsed = 0
+                local build = EbonBuilds.Build.GetActive()
+                if build and build.automationEnabled then
+                    build.automationEnabled = false
+                    EbonBuilds.Build.Save(build.id, build)
+                    wasAutoDisabled = true
+                    EbonBuildsDB._autoDisabledAt80 = true
+                end
+                maxLevelReached = false
+            end
+        end)
+    end
+    maxLevelShutdownElapsed = 0
+    maxLevelShutdownFrame:Show()
 end
 
 -- Returns the cached peak (computed at first evaluation of the current run).
@@ -216,199 +246,217 @@ end
 -- Main evaluation entry point
 ------------------------------------------------------------------------
 
+local evalInProgress = false
+
 function EbonBuilds.Automation.Evaluate()
-    local build = EbonBuilds.Build.GetActive()
-    if not build or not build.automationEnabled then return false end
+    if evalInProgress then return false end
+    evalInProgress = true
 
-    local choices = ProjectEbonhold.PerkService.GetCurrentChoice()
-    if not choices or #choices == 0 then return false end
-
-    local settings   = EbonBuilds.Scoring.GetEffectiveSettings()
-    local runData    = GetRunData()
-    local lockedList = build.lockedEchoes or {}
-
-    local peakScore = EbonBuilds.Automation.GetPeak()
-
-    -- Score all offered choices
-    local scored = {}
-    for i, choice in ipairs(choices) do
-        local s = ScoreChoice(choice, settings)
-        if s then
-            s.index = i -- 1-based
-            scored[#scored + 1] = s
+    local function body()
+        -- While echoes are still being offered at max level, keep
+        -- resetting the shutdown countdown so queued echoes are
+        -- processed before automation is disabled.
+        if maxLevelReached and UnitLevel("player") == 80 then
+            StartMaxLevelShutdownTimer()
         end
-    end
-    if #scored == 0 then return false end
 
-    local banList    = settings.echoBanList or {}
-    local whitelist  = settings.banishFamilyWhitelist or {}
-    AnnotateScored(scored, banList, whitelist, lockedList)
+        local build = EbonBuilds.Build.GetActive()
+        if not build or not build.automationEnabled then return false end
 
-    -- PRE-CHECK: if any offered echo matches a locked echo slot, select it
-    for _, s in ipairs(scored) do
-        for _, lockedId in ipairs(lockedList) do
-            if lockedId and lockedId == s.spellId then
-                ProjectEbonhold.PerkService.SelectPerk(s.spellId)
-                UpdateStat(build, "picks")
-                LogAndToast(scored, "Select (Locked)", s.index)
-                return true
+        local choices = ProjectEbonhold.PerkService.GetCurrentChoice()
+        if not choices or #choices == 0 then return false end
+
+        local settings   = EbonBuilds.Scoring.GetEffectiveSettings()
+        local runData    = GetRunData()
+        local lockedList = build.lockedEchoes or {}
+
+        local peakScore = EbonBuilds.Automation.GetPeak()
+
+        -- Score all offered choices
+        local scored = {}
+        for i, choice in ipairs(choices) do
+            local s = ScoreChoice(choice, settings)
+            if s then
+                s.index = i -- 1-based
+                scored[#scored + 1] = s
             end
         end
-    end
+        if #scored == 0 then return false end
 
-    --------------------------------------------------------------------
-    -- 1. TRY BANISH (highest action priority)
-    --------------------------------------------------------------------
-    if runData and (runData.remainingBanishes or 0) > 0 then
-        table.sort(scored, function(a, b) return a.score < b.score end)
+        local banList    = settings.echoBanList or {}
+        local whitelist  = settings.banishFamilyWhitelist or {}
+        AnnotateScored(scored, banList, whitelist, lockedList)
 
-        -- Ban-list echoes first (these have minimum priority)
+        -- PRE-CHECK: if any offered echo matches a locked echo slot, select it
         for _, s in ipairs(scored) do
-            if not s.isFrozen and not s.isCarried and banList[s.spellId] then
-                if not s.isProtected then
-                    local ok = ProjectEbonhold.PerkService.BanishPerk(s.index - 1)
-                    if ok then
-                        UpdateStat(build, "banishesUsed")
-                        table.sort(scored, function(a, b) return a.index < b.index end)
-                        LogAndToast(scored, "Banish", s.index)
-                        return true
-                    end
-                end
-            end
-        end
-
-        -- Then echoes below autoBanishPct threshold
-        local threshold = math.floor(peakScore * settings.autoBanishPct / 100)
-        for _, s in ipairs(scored) do
-            if not s.isFrozen and not s.isCarried and s.score < threshold then
-                if not s.isProtected then
-                    local ok = ProjectEbonhold.PerkService.BanishPerk(s.index - 1)
-                    if ok then
-                        UpdateStat(build, "banishesUsed")
-                        table.sort(scored, function(a, b) return a.index < b.index end)
-                        LogAndToast(scored, "Banish", s.index)
-                        return true
-                    end
-                end
-            end
-        end
-    end
-
-    -- Restore original display order (left-to-right by index) after the
-    -- banish step may have re-sorted by score.
-    table.sort(scored, function(a, b) return a.index < b.index end)
-
-    --------------------------------------------------------------------
-    -- 2. TRY REROLL
-    --------------------------------------------------------------------
-    if runData and (runData.totalRerolls or 0) - (runData.usedRerolls or 0) > 0 then
-        -- Reroll guard: skip if any single echo is above the guard threshold,
-        -- regardless of the sum. Prevents rerolling when one good echo is
-        -- offered alongside weak ones.
-        local guardPct = settings.rerollGuardPct or 90
-        local guardThreshold = math.floor(peakScore * guardPct / 100)
-        local blockedByGuard = false
-        for _, s in ipairs(scored) do
-            if s.score >= guardThreshold then
-                blockedByGuard = true
-                break
-            end
-        end
-        if not blockedByGuard then
-            local sum = 0
-            for _, s in ipairs(scored) do sum = sum + s.score end
-            if sum < peakScore * settings.autoRerollPct / 100 then
-                local ok = ProjectEbonhold.PerkService.RequestReroll()
-                if ok then
-                    UpdateStat(build, "rerollsUsed")
-                    LogAndToast(scored, "Reroll", 0)
+            for _, lockedId in ipairs(lockedList) do
+                if lockedId and lockedId == s.spellId then
+                    ProjectEbonhold.PerkService.SelectPerk(s.spellId)
+                    UpdateStat(build, "picks")
+                    LogAndToast(scored, "Select (Locked)", s.index)
                     return true
                 end
             end
         end
-    end
 
-    --------------------------------------------------------------------
-    --------------------------------------------------------------------
-    -- 3. TRY FREEZE
-    --------------------------------------------------------------------
-    -- Freeze one echo per evaluation so the server has time to confirm
-    -- each freeze before the next one.  The timer re-invokes Evaluate()
-    -- which scores fresh (reflecting isFrozen / isCarried state) and
-    -- applies the penalty to locally-frozen echoes so their scores
-    -- degrade toward the eventual pick.
-    if runData and (runData.totalFreezes or 0) - (runData.usedFreezes or 0) > 0 then
-        local penalty = (settings.freezePenaltyPct or 0) / 100
+        --------------------------------------------------------------------
+        -- 1. TRY BANISH (highest action priority)
+        --------------------------------------------------------------------
+        if runData and (runData.remainingBanishes or 0) > 0 then
+            table.sort(scored, function(a, b) return a.score < b.score end)
 
-        -- Apply freeze penalty to echoes we already froze this round
-        -- so they are deprioritised in subsequent evaluations.
-        -- Only applied when the server hasn't confirmed isFrozen yet;
-        -- ScoreChoice already handles the penalty once isFrozen is true.
-        if penalty > 0 then
+            -- Ban-list echoes first (these have minimum priority)
             for _, s in ipairs(scored) do
-                if locallyFrozenIndices[s.index] and not s.isFrozen then
-                    s.score = math.floor(s.score * (1 - penalty))
+                if not s.isFrozen and not s.isCarried and banList[s.spellId] then
+                    if not s.isProtected then
+                        local ok = ProjectEbonhold.PerkService.BanishPerk(s.index - 1)
+                        if ok then
+                            UpdateStat(build, "banishesUsed")
+                            table.sort(scored, function(a, b) return a.index < b.index end)
+                            LogAndToast(scored, "Banish", s.index)
+                            return true
+                        end
+                    end
+                end
+            end
+
+            -- Then echoes below autoBanishPct threshold
+            local threshold = math.floor(peakScore * settings.autoBanishPct / 100)
+            for _, s in ipairs(scored) do
+                if not s.isFrozen and not s.isCarried and s.score < threshold then
+                    if not s.isProtected then
+                        local ok = ProjectEbonhold.PerkService.BanishPerk(s.index - 1)
+                        if ok then
+                            UpdateStat(build, "banishesUsed")
+                            table.sort(scored, function(a, b) return a.index < b.index end)
+                            LogAndToast(scored, "Banish", s.index)
+                            return true
+                        end
+                    end
                 end
             end
         end
 
-        local threshold = math.floor(peakScore * settings.autoFreezePct / 100)
+        -- Restore original display order (left-to-right by index) after the
+        -- banish step may have re-sorted by score.
+        table.sort(scored, function(a, b) return a.index < b.index end)
 
-        -- Offered choices above freeze threshold, excluding echoes that
-        -- are already frozen (server), carried, or locally frozen this round.
-        local aboveChoices = {}
-        for _, s in ipairs(scored) do
-            if not s.isFrozen and not s.isCarried and not locallyFrozenIndices[s.index] and s.score > threshold then
-                aboveChoices[#aboveChoices + 1] = s
-            end
-        end
-
-        -- Locked echoes above freeze threshold
-        local lockedAbove = 0
-        for _, lockedId in ipairs(lockedList) do
-            if lockedId then
-                local ls = ScoreLockedEcho(lockedId, settings)
-                if ls > threshold then lockedAbove = lockedAbove + 1 end
-            end
-        end
-
-        -- Requires at least 2 offered echoes above threshold so we can
-        -- freeze the lowest and select a different highest one.
-        if (#aboveChoices + lockedAbove) >= 2 and #aboveChoices >= 2 then
-            table.sort(aboveChoices, function(a, b) return a.score > b.score end)
-
-            -- Freeze the single lowest-scored echo above the threshold.
-            -- (Multiple would race the server; one-per-eval is reliable.)
-            local lowest = aboveChoices[#aboveChoices]
-            local ok = ProjectEbonhold.PerkService.FreezePerk(lowest.index - 1)
-            if ok then
-                UpdateStat(build, "freezesUsed")
-                locallyFrozenIndices[lowest.index] = true
-
-                -- Optimistically update runData so the toast and session log
-                -- reflect the correct remaining freeze count immediately.
-                if runData and runData.usedFreezes ~= nil then
-                    runData.usedFreezes = runData.usedFreezes + 1
+        --------------------------------------------------------------------
+        -- 2. TRY REROLL
+        --------------------------------------------------------------------
+        if runData and (runData.totalRerolls or 0) - (runData.usedRerolls or 0) > 0 then
+            -- Reroll guard: skip if any single echo is above the guard threshold,
+            -- regardless of the sum. Prevents rerolling when one good echo is
+            -- offered alongside weak ones.
+            local guardPct = settings.rerollGuardPct or 90
+            local guardThreshold = math.floor(peakScore * guardPct / 100)
+            local blockedByGuard = false
+            for _, s in ipairs(scored) do
+                if s.score >= guardThreshold then
+                    blockedByGuard = true
+                    break
                 end
-
-                LogAndToast(scored, "Freeze", lowest.index)
-                freezeRoundActive = true
-                StartEvalTimer()
-                return true
+            end
+            if not blockedByGuard then
+                local sum = 0
+                for _, s in ipairs(scored) do sum = sum + s.score end
+                if sum < peakScore * settings.autoRerollPct / 100 then
+                    local ok = ProjectEbonhold.PerkService.RequestReroll()
+                    if ok then
+                        UpdateStat(build, "rerollsUsed")
+                        LogAndToast(scored, "Reroll", 0)
+                        return true
+                    end
+                end
             end
         end
+
+        --------------------------------------------------------------------
+        --------------------------------------------------------------------
+        -- 3. TRY FREEZE
+        --------------------------------------------------------------------
+        -- Freeze one echo per evaluation so the server has time to confirm
+        -- each freeze before the next one.  The timer re-invokes Evaluate()
+        -- which scores fresh (reflecting isFrozen / isCarried state) and
+        -- applies the penalty to locally-frozen echoes so their scores
+        -- degrade toward the eventual pick.
+        if runData and (runData.totalFreezes or 0) - (runData.usedFreezes or 0) > 0 then
+            local penalty = (settings.freezePenaltyPct or 0) / 100
+
+            -- Apply freeze penalty to echoes we already froze this round
+            -- so they are deprioritised in subsequent evaluations.
+            -- Only applied when the server hasn't confirmed isFrozen yet;
+            -- ScoreChoice already handles the penalty once isFrozen is true.
+            if penalty > 0 then
+                for _, s in ipairs(scored) do
+                    if locallyFrozenIndices[s.index] and not s.isFrozen then
+                        s.score = math.floor(s.score * (1 - penalty))
+                    end
+                end
+            end
+
+            local threshold = math.floor(peakScore * settings.autoFreezePct / 100)
+
+            -- Offered choices above freeze threshold, excluding echoes that
+            -- are already frozen (server), carried, or locally frozen this round.
+            local aboveChoices = {}
+            for _, s in ipairs(scored) do
+                if not s.isFrozen and not s.isCarried and not locallyFrozenIndices[s.index] and s.score > threshold then
+                    aboveChoices[#aboveChoices + 1] = s
+                end
+            end
+
+            -- Locked echoes above freeze threshold
+            local lockedAbove = 0
+            for _, lockedId in ipairs(lockedList) do
+                if lockedId then
+                    local ls = ScoreLockedEcho(lockedId, settings)
+                    if ls > threshold then lockedAbove = lockedAbove + 1 end
+                end
+            end
+
+            -- Requires at least 2 offered echoes above threshold so we can
+            -- freeze the lowest and select a different highest one.
+            if (#aboveChoices + lockedAbove) >= 2 and #aboveChoices >= 2 then
+                table.sort(aboveChoices, function(a, b) return a.score > b.score end)
+
+                -- Freeze the single lowest-scored echo above the threshold.
+                -- (Multiple would race the server; one-per-eval is reliable.)
+                local lowest = aboveChoices[#aboveChoices]
+                local ok = ProjectEbonhold.PerkService.FreezePerk(lowest.index - 1)
+                if ok then
+                    UpdateStat(build, "freezesUsed")
+                    locallyFrozenIndices[lowest.index] = true
+
+                    -- Optimistically update runData so the toast and session log
+                    -- reflect the correct remaining freeze count immediately.
+                    if runData and runData.usedFreezes ~= nil then
+                        runData.usedFreezes = runData.usedFreezes + 1
+                    end
+
+                    LogAndToast(scored, "Freeze", lowest.index)
+                    freezeRoundActive = true
+                    StartEvalTimer()
+                    return true
+                end
+            end
+        end
+
+        --------------------------------------------------------------------
+        -- 4. SELECT (fallback)
+        --------------------------------------------------------------------
+        locallyFrozenIndices = {}
+        freezeRoundActive = false
+        local ok, pick = TrySelect(scored, settings, build)
+        if ok and pick then
+            LogAndToast(scored, "Select", pick.index)
+        end
+        return ok
     end
 
-    --------------------------------------------------------------------
-    -- 4. SELECT (fallback)
-    --------------------------------------------------------------------
-    locallyFrozenIndices = {}
-    freezeRoundActive = false
-    local ok, pick = TrySelect(scored, settings, build)
-    if ok and pick then
-        LogAndToast(scored, "Select", pick.index)
-    end
-    return ok
+    local result = body()
+    evalInProgress = false
+    return result
 end
 
 ------------------------------------------------------------------------
@@ -418,6 +466,57 @@ end
 function EbonBuilds.Automation.Init()
     if not ProjectEbonhold or not ProjectEbonhold.PerkUI then return end
     if ProjectEbonhold.PerkUI._ebonBuildsHooked then return end
+
+    -- Schedule automation shutdown when the player hits max level.
+    -- The timer resets every time Evaluate() runs, so queued echoes
+    -- from the level-80 ding are processed before disabling.
+    if not maxLevelEventFrame then
+        maxLevelEventFrame = CreateFrame("Frame")
+        maxLevelEventFrame:RegisterEvent("PLAYER_LEVEL_UP")
+        maxLevelEventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+        maxLevelEventFrame:SetScript("OnEvent", function(_, event, level)
+            if event == "PLAYER_LEVEL_UP" then
+                if level == 80 then
+                    maxLevelReached = true
+                    StartMaxLevelShutdownTimer()
+                end
+            elseif event == "PLAYER_ENTERING_WORLD" then
+                if UnitLevel("player") < 80 then
+                    if wasAutoDisabled or EbonBuildsDB._autoDisabledAt80 then
+                        local build = EbonBuilds.Build.GetActive()
+                        if build and not build.automationEnabled then
+                            build.automationEnabled = true
+                            EbonBuilds.Build.Save(build.id, build)
+                        end
+                        wasAutoDisabled = false
+                        EbonBuildsDB._autoDisabledAt80 = nil
+                        maxLevelReached = false
+                    end
+                end
+            end
+        end)
+    end
+
+    -- Handle reload at 80: PLAYER_LEVEL_UP won't fire again.
+    -- Also handle reload below 80 after an auto-disable (reset before PEW fired).
+    local currentLevel = UnitLevel("player")
+    if currentLevel == 80 then
+        local build = EbonBuilds.Build.GetActive()
+        if build and build.automationEnabled then
+            maxLevelReached = true
+            StartMaxLevelShutdownTimer()
+            EbonBuildsDB._autoDisabledAt80 = nil
+        elseif build and EbonBuildsDB._autoDisabledAt80 then
+            EbonBuildsDB._autoDisabledAt80 = nil
+        end
+    elseif currentLevel < 80 and EbonBuildsDB._autoDisabledAt80 then
+        local build = EbonBuilds.Build.GetActive()
+        if build and not build.automationEnabled then
+            build.automationEnabled = true
+            EbonBuilds.Build.Save(build.id, build)
+        end
+        EbonBuildsDB._autoDisabledAt80 = nil
+    end
 
     local PerkUI = ProjectEbonhold.PerkUI
 

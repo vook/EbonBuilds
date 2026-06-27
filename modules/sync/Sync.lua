@@ -18,6 +18,9 @@ local SYNC_TIMEOUT  = 15
 local BATCH_SIZE    = 3
 local WANT_TIMEOUT  = 15
 local REQ_COOLDOWN  = 30
+local OFFLINE_COOLDOWN        = 60  -- seconds to block re-sends to a target detected as offline
+local MAX_QUEUE_SIZE          = 500 -- safety cap to prevent unbounded queue growth
+local MAX_CONSECUTIVE_SENDS   = 2   -- max sends to a target without receiving a response
 
 -- Bump this to invalidate remote builds from older addon versions.
 -- Only affects builds that have NOT been imported — imported builds stay.
@@ -32,10 +35,13 @@ local syncChannelIndex
 local inflight = {}
 local sendQueue = {}
 local nextSendTime = 0
-local SEND_DELAY = 0.05
+local SEND_DELAY = 0.15  -- ~6.7 msg/s; WoW 3.3.5a anti-spam ceiling is ~10 msg/s
 local pendingBatches = {}
 local lastRequestTime = 0
+local MAX_CHANNEL_RETRIES = 2
 local channelRetries = { remaining = 0, payload = nil, nextTime = 0 }
+local failedTargets = {}  -- [playerName] = blockUntil (Now() + OFFLINE_COOLDOWN)
+local sendTally = {}      -- [playerName] = consecutive sends without response
 
 local function Now()
     return GetTime()
@@ -47,6 +53,13 @@ end
 
 local function VerboseLog(msg)
     if VERBOSE_LOG then Log(msg) end
+end
+
+local function MarkAlive(target)
+    -- Reset consecutive send counter when we receive any message from this target
+    if target and target ~= "" then
+        sendTally[target] = nil
+    end
 end
 
 local function SortableNow()
@@ -90,6 +103,57 @@ local function DateToEpoch(d)
 end
 
 ------------------------------------------------------------------------
+-- Offline detection — prevents flooding SendAddonMessage to offline targets
+------------------------------------------------------------------------
+
+local function HandleSystemMessage(msg)
+    -- WoW 3.3.5a shows this system message when SendAddonMessage WHISPER
+    -- targets an offline player: "No player named 'JohnDoe' is currently playing."
+    -- Constant: ERR_CHAT_PLAYER_NOT_FOUND_S
+    local lower = msg:lower()
+    local isOffline = false
+    if lower:find("no player named", 1, true) then
+        isOffline = true
+    end
+    if not isOffline then return end
+
+    local now = Now()
+
+    -- Check pendingBatches — these are responders we're actively serving
+    for target in pairs(pendingBatches) do
+        if lower:find(target:lower(), 1, true) then
+            failedTargets[target] = now + OFFLINE_COOLDOWN
+            sendTally[target] = nil
+            for i = #sendQueue, 1, -1 do
+                if sendQueue[i].target == target then
+                    table.remove(sendQueue, i)
+                end
+            end
+            pendingBatches[target] = nil
+            VerboseLog("Player " .. target .. " is offline — cancelled pending sync batch.")
+            return
+        end
+    end
+
+    -- Also scan sendQueue in case pendingBatches was already cleaned
+    for _, entry in ipairs(sendQueue) do
+        if lower:find(entry.target:lower(), 1, true) then
+            local target = entry.target
+            failedTargets[target] = now + OFFLINE_COOLDOWN
+            sendTally[target] = nil
+            for i = #sendQueue, 1, -1 do
+                if sendQueue[i].target == target then
+                    table.remove(sendQueue, i)
+                end
+            end
+            pendingBatches[target] = nil
+            VerboseLog("Player " .. target .. " is offline — flushed send queue.")
+            return
+        end
+    end
+end
+
+------------------------------------------------------------------------
 -- Channel management
 ------------------------------------------------------------------------
 
@@ -129,6 +193,16 @@ end
 
 local function Enqueue(target, payload)
     if not target or target == "" or not payload then return end
+    -- Reject if target was recently detected as offline
+    if failedTargets[target] then
+        local t = Now()
+        if t < failedTargets[target] then return end
+        failedTargets[target] = nil  -- cooldown expired, allow retry
+    end
+    -- Safety cap: drop oldest entry if queue grows unreasonably large
+    if #sendQueue >= MAX_QUEUE_SIZE then
+        table.remove(sendQueue, 1)
+    end
     sendQueue[#sendQueue + 1] = { target = target, payload = payload }
 end
 
@@ -162,6 +236,17 @@ local function CleanupExpired()
     for k, v in pairs(pendingBatches) do
         if t - (v.t0 or t) > WANT_TIMEOUT then
             pendingBatches[k] = nil
+        end
+    end
+    for k, expires in pairs(failedTargets) do
+        if t >= expires then
+            failedTargets[k] = nil
+        end
+    end
+    -- Garbage-collect sendTally entries that haven't been touched in > SYNC_TIMEOUT
+    for k in pairs(sendTally) do
+        if not pendingBatches[k] and not failedTargets[k] then
+            sendTally[k] = nil
         end
     end
 end
@@ -321,6 +406,7 @@ end
 
 local function HandleChannelMessage(msg, sender, _, channelName, _, _, channelNumber)
     if not IsSyncChannelName(channelName) then return end
+    MarkAlive(sender)
 
     -- Learn the channel index from incoming messages (arg7)
     if channelNumber and type(channelNumber) == "number" and channelNumber > 0 then
@@ -346,7 +432,8 @@ end
 local function HandleAddonREQ(payload, sender)
     local parts = {strsplit("|", payload)}
     if parts[1] ~= "REQ" then return end
-    HandleRequest(parts[2])
+    local ok, err = pcall(HandleRequest, parts[2])
+    if not ok then Log("HandleAddonREQ error: " .. tostring(err)) end
 end
 
 local function HandleChunk(payload, sender)
@@ -475,6 +562,7 @@ end
 local function DispatchAddon(prefix, payload, dist, sender)
     if prefix ~= PREFIX then return end
     if not payload or payload == "" then return end
+    MarkAlive(sender)
 
     local code = payload:sub(1, 3)
     if code == "REQ" then
@@ -520,7 +608,7 @@ function EbonBuilds.Sync.RequestSync()
     -- Escape | as || for SendChatMessage (avoids "Invalid escape code");
     -- receiver will decode || back to | before parsing.
     local escapedPayload = payload:gsub("|", "||")
-    channelRetries.remaining = 5
+    channelRetries.remaining = MAX_CHANNEL_RETRIES
     channelRetries.payload = escapedPayload
     channelRetries.nextTime = 0  -- fire immediately on next OnUpdate
 
@@ -537,12 +625,15 @@ function EbonBuilds.Sync.Init()
     syncFrame = CreateFrame("Frame")
     syncFrame:RegisterEvent("CHAT_MSG_ADDON")
     syncFrame:RegisterEvent("CHAT_MSG_CHANNEL")
+    syncFrame:RegisterEvent("CHAT_MSG_SYSTEM")
     syncFrame:RegisterEvent("PLAYER_LEVEL_UP")
     syncFrame:SetScript("OnEvent", function(_, event, ...)
         if event == "CHAT_MSG_ADDON" then
             DispatchAddon(...)
         elseif event == "CHAT_MSG_CHANNEL" then
             HandleChannelMessage(...)
+        elseif event == "CHAT_MSG_SYSTEM" then
+            HandleSystemMessage(...)
         elseif event == "PLAYER_LEVEL_UP" then
             local newLevel = ...
             if newLevel == 80 then
@@ -559,20 +650,34 @@ function EbonBuilds.Sync.Init()
         -- Channel retry loop
         if channelRetries.remaining > 0 and now >= channelRetries.nextTime then
             channelRetries.remaining = channelRetries.remaining - 1
-            local ok = pcall(SendChatMessage, channelRetries.payload, "CHANNEL", nil, 1)
-            Log("REQ attempt " .. (5 - channelRetries.remaining) .. "/5: " .. (ok and "sent" or tostring("err")))
-            if ok or channelRetries.remaining == 0 then
+            local sent = false
+            if syncChannelIndex and syncChannelIndex > 0 then
+                local ok, err = pcall(SendChatMessage, channelRetries.payload, "CHANNEL", nil, syncChannelIndex)
+                sent = ok
+                if not ok then
+                    VerboseLog("REQ attempt " .. (MAX_CHANNEL_RETRIES - channelRetries.remaining) .. "/" .. MAX_CHANNEL_RETRIES .. " failed: " .. tostring(err))
+                end
+            end
+            if sent or channelRetries.remaining == 0 then
                 channelRetries.remaining = 0
             else
                 channelRetries.nextTime = now + 0.1
             end
         end
-        -- Send queue (rate-limited)
+        -- Send queue (rate-limited, with offline guard)
         if #sendQueue > 0 and now >= nextSendTime then
             local entry = sendQueue[1]
             table.remove(sendQueue, 1)
             if entry.target and entry.target ~= "" and entry.payload then
-                SendAddonMessage(PREFIX, entry.payload, "WHISPER", entry.target)
+                local blocked = failedTargets[entry.target]
+                local tally = sendTally[entry.target] or 0
+                if (blocked and now < blocked) or tally >= MAX_CONSECUTIVE_SENDS then
+                    -- Drop silently — target was detected offline or exceeded send limit
+                else
+                    if blocked then failedTargets[entry.target] = nil end
+                    SendAddonMessage(PREFIX, entry.payload, "WHISPER", entry.target)
+                    sendTally[entry.target] = tally + 1
+                end
             end
             nextSendTime = now + SEND_DELAY
         end
