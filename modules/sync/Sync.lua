@@ -413,7 +413,8 @@ end
 local function HandleAddonREQ(payload, sender)
     local parts = {strsplit("|", payload)}
     if parts[1] ~= "REQ" then return end
-    HandleRequest(parts[2])
+    local ok, err = pcall(HandleRequest, parts[2])
+    if not ok then Log("HandleAddonREQ error: " .. tostring(err)) end
 end
 
 local function HandleChunk(payload, sender)
