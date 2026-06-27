@@ -32,6 +32,7 @@ local maxLevelReached          = false
 local maxLevelShutdownFrame    = nil
 local maxLevelShutdownElapsed  = 0
 local maxLevelEventFrame       = nil
+local wasAutoDisabled          = false  -- true when the shutdown timer (not the user) disabled automation
 
 ------------------------------------------------------------------------
 -- Internal helpers
@@ -74,6 +75,8 @@ local function StartMaxLevelShutdownTimer()
                 if build and build.automationEnabled then
                     build.automationEnabled = false
                     EbonBuilds.Build.Save(build.id, build)
+                    wasAutoDisabled = true
+                    EbonBuildsDB._autoDisabledAt80 = true
                 end
                 maxLevelReached = false
             end
@@ -470,21 +473,49 @@ function EbonBuilds.Automation.Init()
     if not maxLevelEventFrame then
         maxLevelEventFrame = CreateFrame("Frame")
         maxLevelEventFrame:RegisterEvent("PLAYER_LEVEL_UP")
-        maxLevelEventFrame:SetScript("OnEvent", function(_, _, level)
-            if level == 80 then
-                maxLevelReached = true
-                StartMaxLevelShutdownTimer()
+        maxLevelEventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+        maxLevelEventFrame:SetScript("OnEvent", function(_, event, level)
+            if event == "PLAYER_LEVEL_UP" then
+                if level == 80 then
+                    maxLevelReached = true
+                    StartMaxLevelShutdownTimer()
+                end
+            elseif event == "PLAYER_ENTERING_WORLD" then
+                if UnitLevel("player") < 80 then
+                    if wasAutoDisabled or EbonBuildsDB._autoDisabledAt80 then
+                        local build = EbonBuilds.Build.GetActive()
+                        if build and not build.automationEnabled then
+                            build.automationEnabled = true
+                            EbonBuilds.Build.Save(build.id, build)
+                        end
+                        wasAutoDisabled = false
+                        EbonBuildsDB._autoDisabledAt80 = nil
+                        maxLevelReached = false
+                    end
+                end
             end
         end)
     end
 
     -- Handle reload at 80: PLAYER_LEVEL_UP won't fire again.
-    if UnitLevel("player") == 80 then
+    -- Also handle reload below 80 after an auto-disable (reset before PEW fired).
+    local currentLevel = UnitLevel("player")
+    if currentLevel == 80 then
         local build = EbonBuilds.Build.GetActive()
         if build and build.automationEnabled then
             maxLevelReached = true
             StartMaxLevelShutdownTimer()
+            EbonBuildsDB._autoDisabledAt80 = nil
+        elseif build and EbonBuildsDB._autoDisabledAt80 then
+            EbonBuildsDB._autoDisabledAt80 = nil
         end
+    elseif currentLevel < 80 and EbonBuildsDB._autoDisabledAt80 then
+        local build = EbonBuilds.Build.GetActive()
+        if build and not build.automationEnabled then
+            build.automationEnabled = true
+            EbonBuilds.Build.Save(build.id, build)
+        end
+        EbonBuildsDB._autoDisabledAt80 = nil
     end
 
     local PerkUI = ProjectEbonhold.PerkUI
