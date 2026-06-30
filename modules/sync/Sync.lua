@@ -157,15 +157,19 @@ end
 -- Channel management
 ------------------------------------------------------------------------
 
-local function FindOrJoinChannel()
-    for i = 1, 10 do
-        local raw = GetChannelName(i)
-        if IsSyncChannelName(raw) then
-            return i
+local function FindSyncChannel()
+    -- GetChannelList() returns all joined channels as id, name pairs
+    -- (e.g. 2, "LocalDefense", 4, "ebonbuildssync", 7, "world").
+    -- This is the most reliable discovery method across servers.
+    if not GetChannelList then return nil end
+    local all = {GetChannelList()}
+    for i = 1, #all, 2 do
+        local idx = tonumber(all[i])
+        local name = all[i + 1]
+        if idx and idx > 0 and type(name) == "string" and IsSyncChannelName(name) then
+            return idx
         end
     end
-    local idx = JoinChannelByName(SYNC_CHANNEL)
-    if idx and idx > 0 then return idx end
     return nil
 end
 
@@ -179,11 +183,17 @@ local function HideChannelFromChat()
 end
 
 local function RefreshChannel()
-    if not syncChannelIndex or syncChannelIndex == 0 then
-        syncChannelIndex = FindOrJoinChannel()
-        if syncChannelIndex and syncChannelIndex > 0 then
-            HideChannelFromChat()
+    local idx = FindSyncChannel()
+    if idx and idx > 0 then
+        if syncChannelIndex ~= idx then
+            Log("Sync channel index updated: " .. (syncChannelIndex or "nil") .. " -> " .. idx)
+            syncChannelIndex = idx
         end
+    elseif syncChannelIndex and syncChannelIndex > 0 then
+        -- We have a cached index from a previous REQ reception; keep it.
+    else
+        Log("Sync channel not found — join with /join " .. SYNC_CHANNEL)
+        syncChannelIndex = nil
     end
 end
 
@@ -405,22 +415,35 @@ end
 ------------------------------------------------------------------------
 
 local function HandleChannelMessage(msg, sender, _, channelName, _, _, channelNumber)
-    if not IsSyncChannelName(channelName) then return end
-    MarkAlive(sender)
-
-    -- Learn the channel index from incoming messages (arg7)
-    if channelNumber and type(channelNumber) == "number" and channelNumber > 0 then
-        if not syncChannelIndex or syncChannelIndex ~= channelNumber then
-            syncChannelIndex = channelNumber
-            VerboseLog("Learned sync channel index from incoming message: " .. channelNumber)
-        end
+    -- Skip channels whose name we CAN validate as not being the sync channel.
+    -- Some servers return slot IDs (e.g. "4") instead of readable names
+    -- (e.g. "ebonbuildssync"). In that case IsSyncChannelName would reject
+    -- every channel, so we fall through to content-based filtering below.
+    if IsSyncChannelName(channelName) then
+        -- channelName is readable and matched — definitely our channel
+    elseif type(channelName) == "string" and channelName ~= "" then
+        -- channelName is a string but not a match (e.g. "General" on retail,
+        -- or a slot ID on servers that return numbers). Only way to know is
+        -- to inspect the message content.
+    else
+        return  -- nil / empty channelName, ignore
     end
 
-    -- Decode escaped pipes: SendChatMessage escapes | as ||, WoW may not unescape them
+    MarkAlive(sender)
+
     local decoded = msg:gsub("||", "|")
     local parts = {strsplit("|", decoded)}
     local code = parts[1]
     if code ~= "REQ" then return end
+
+    -- We received a valid REQ on this channel — learn its index
+    if channelNumber and type(channelNumber) == "number" and channelNumber > 0 then
+        if not syncChannelIndex or syncChannelIndex ~= channelNumber then
+            syncChannelIndex = channelNumber
+            Log("Sync channel index learned: " .. channelNumber)
+        end
+    end
+
     local ok, err = pcall(HandleRequest, parts[2])
     if not ok then Log("HandleRequest error: " .. tostring(err)) end
 end
@@ -605,8 +628,6 @@ function EbonBuilds.Sync.RequestSync()
 
     -- 1. Broadcast via hidden chat channel (all addon users on the realm)
     RefreshChannel()
-    -- Escape | as || for SendChatMessage (avoids "Invalid escape code");
-    -- receiver will decode || back to | before parsing.
     local escapedPayload = payload:gsub("|", "||")
     channelRetries.remaining = MAX_CHANNEL_RETRIES
     channelRetries.payload = escapedPayload
@@ -651,11 +672,24 @@ function EbonBuilds.Sync.Init()
         if channelRetries.remaining > 0 and now >= channelRetries.nextTime then
             channelRetries.remaining = channelRetries.remaining - 1
             local sent = false
+            -- Try by index first (fast path when JoinChannelByName worked)
             if syncChannelIndex and syncChannelIndex > 0 then
                 local ok, err = pcall(SendChatMessage, channelRetries.payload, "CHANNEL", nil, syncChannelIndex)
-                sent = ok
-                if not ok then
-                    VerboseLog("REQ attempt " .. (MAX_CHANNEL_RETRIES - channelRetries.remaining) .. "/" .. MAX_CHANNEL_RETRIES .. " failed: " .. tostring(err))
+                if ok then
+                    Log("REQ sent on channel index " .. syncChannelIndex)
+                    sent = true
+                else
+                    Log("REQ by index failed: " .. tostring(err) .. " — trying by name")
+                end
+            end
+            -- Fallback: send by channel name string
+            if not sent then
+                local ok, err = pcall(SendChatMessage, channelRetries.payload, "CHANNEL", nil, SYNC_CHANNEL)
+                if ok then
+                    Log("REQ sent on channel name " .. SYNC_CHANNEL)
+                    sent = true
+                else
+                    Log("REQ by name also failed: " .. tostring(err))
                 end
             end
             if sent or channelRetries.remaining == 0 then
@@ -684,8 +718,13 @@ function EbonBuilds.Sync.Init()
     end)
 
     -- Join and hide the sync channel
-    syncChannelIndex = FindOrJoinChannel()
-    HideChannelFromChat()
+    syncChannelIndex = FindSyncChannel() or JoinChannelByName(SYNC_CHANNEL)
+    if syncChannelIndex and syncChannelIndex > 0 then
+        Log("Sync channel at index " .. syncChannelIndex)
+        HideChannelFromChat()
+    else
+        Log("Sync channel not found — join with /join " .. SYNC_CHANNEL)
+    end
 
     EbonBuildsDB.lastSyncDate = EbonBuildsDB.lastSyncDate or nil
     EbonBuildsDB.syncPeers    = EbonBuildsDB.syncPeers    or {}
