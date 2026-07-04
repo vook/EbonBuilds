@@ -20,7 +20,9 @@ local WANT_TIMEOUT  = 15
 local REQ_COOLDOWN  = 30
 local OFFLINE_COOLDOWN        = 60  -- seconds to block re-sends to a target detected as offline
 local MAX_QUEUE_SIZE          = 500 -- safety cap to prevent unbounded queue growth
-local MAX_CONSECUTIVE_SENDS   = 2   -- max sends to a target without receiving a response
+local MAX_CONSECUTIVE_SENDS   = 200 -- max sends to a target without receiving a response.
+                                    -- Covers worst-case batch: 1 LST + (3 builds × ~60 BLD
+                                    -- chunks for a 10 KB export) + 1 END = ~182 messages.
 
 -- Bump this to invalidate remote builds from older addon versions.
 -- Only affects builds that have NOT been imported — imported builds stay.
@@ -332,6 +334,8 @@ local function SendNextBatch(requester)
         parts[#parts + 1] = tostring(DateToEpoch(b.lastModified))
     end
     Enqueue(requester, table.concat(parts, "|"))
+    VerboseLog(string.format("LST batch %s enqueued for %s (%d builds)",
+        pb.current .. "/" .. pb.totalBatches, requester, finish - start + 1))
 end
 
 local function SendBatchBuilds(requester, wantedUuids)
@@ -348,6 +352,8 @@ local function SendBatchBuilds(requester, wantedUuids)
         if wanted[b.id] then
             local b64 = EbonBuilds.ExportImport.ExportBuild(b)
             if b64 then
+                VerboseLog(string.format("BLD enqueued for %s: %s (%d bytes)",
+                    requester, b.id, #b64))
                 SendChunked(requester, "BLD", b.id, b64)
                 pb.sent = pb.sent + 1
             end
@@ -366,6 +372,9 @@ local function HandleRequest(requester)
 
     EbonBuildsDB.syncPeers = EbonBuildsDB.syncPeers or {}
     EbonBuildsDB.syncPeers[requester] = true
+
+    -- Target just contacted us — reset send cap so BLD chunks aren't blocked
+    sendTally[requester] = nil
 
     local allPublic = EbonBuilds.Build.ListPublic()
     VerboseLog("HandleRequest: " .. #allPublic .. " public builds total")
@@ -410,15 +419,16 @@ local function HandleRequest(requester)
     SendNextBatch(requester)
 end
 
--- WoW 3.3.5a chat messages can carry server-injected prefixes (e.g. Ebonhold
--- hardcore tier markers like "|cffff0000[HCIV]|r"). Strip them before parsing
--- so they don't break the pipe-delimited protocol.
+-- Messages (both visible chat and SendAddonMessage) can carry server-injected
+-- prefixes (e.g. Ebonhold hardcore tier markers like "|cffff0000[HCIV]|r").
+-- Strip WoW colour escapes, then remove any bracket-enclosed prefix at the
+-- start (handles [HCI] through [HCX] and any future server-injected tag).
 local function _StripChatPrefix(msg)
 -- Exported as EbonBuilds.Sync._StripChatPrefix for unit tests
-	-- Remove WoW colour escape sequences: |cAARRGGBB and |r
-	local stripped = msg:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
-	-- Remove hardcore prefix like [HCI], [HCII], [HCIII], [HCIV], ...
-	stripped = stripped:gsub("^%s*%[HC[IVX]+%]%s*", "")
+	-- Remove WoW colour escape sequences: |c + hex digits + |r
+	local stripped = msg:gsub("|c%x+", ""):gsub("|r", "")
+	-- Remove bracket-enclosed server prefix at start: [HCIV], [HCI], etc.
+	stripped = stripped:gsub("^%s*%[[^%]]+%]%s*", "")
 	return stripped
 end
 
@@ -426,19 +436,14 @@ end
 -- Channel message handler (REQ via custom chat channel)
 ------------------------------------------------------------------------
 
-local function HandleChannelMessage(msg, sender, _, channelName, _, _, channelNumber)
-    -- Skip channels whose name we CAN validate as not being the sync channel.
-    -- Some servers return slot IDs (e.g. "4") instead of readable names
-    -- (e.g. "ebonbuildssync"). In that case IsSyncChannelName would reject
-    -- every channel, so we fall through to content-based filtering below.
-    if IsSyncChannelName(channelName) then
-        -- channelName is readable and matched — definitely our channel
-    elseif type(channelName) == "string" and channelName ~= "" then
-        -- channelName is a string but not a match (e.g. "General" on retail,
-        -- or a slot ID on servers that return numbers). Only way to know is
-        -- to inspect the message content.
-    else
-        return  -- nil / empty channelName, ignore
+local function HandleChannelMessage(msg, sender, _, channelName, _, _, _, channelNumber)
+    -- CHAT_MSG_CHANNEL args: text, playerName, language, channelName,
+    --   playerName2, specialFlag, zoneChannelID, channelIndex, channelBaseName.
+    -- channelNumber = arg8 (channelIndex), arg5-7 skipped via _ placeholders.
+    -- channelName may be a name string, slot ID string, or slot ID number
+    -- depending on server — accept anything non-nil and non-empty.
+    if not channelName or channelName == "" then
+        return
     end
 
     MarkAlive(sender)
@@ -510,6 +515,7 @@ end
 
 local function HandleListBatch(payload, sender)
     -- payload: "LST|sender|batch/total|uuid1|epoch1|uuid2|epoch2|..."
+    VerboseLog(string.format("LST received from %s", sender))
     local parts = {strsplit("|", payload)}
     if #parts < 4 then return end
 
@@ -547,9 +553,11 @@ local function HandleListBatch(payload, sender)
     end
 
     if #wanted == 0 then
+        VerboseLog(string.format("SKP enqueued for %s (nothing wanted)", sender))
         local skipPayload = string.format("SKP|%s", UnitName("player"))
         Enqueue(sender, skipPayload)
     else
+        VerboseLog(string.format("WNT enqueued for %s: %d builds", sender, #wanted))
         local wantParts = { "WNT", UnitName("player") }
         for _, uuid in ipairs(wanted) do
             wantParts[#wantParts + 1] = uuid
@@ -560,6 +568,7 @@ end
 
 local function HandleWant(payload, sender)
     -- payload: "WNT|requester|uuid1|uuid2|..."
+    VerboseLog(string.format("WNT received from %s", sender))
     local parts = {strsplit("|", payload)}
     if parts[1] ~= "WNT" then return end
     local wantedUuids = {}
@@ -570,6 +579,7 @@ local function HandleWant(payload, sender)
 end
 
 local function HandleSkip(payload, sender)
+    VerboseLog(string.format("SKP received from %s", sender))
     SendBatchBuilds(sender, {})  -- empty = skip all in current batch
 end
 
@@ -600,6 +610,8 @@ local function DispatchAddon(prefix, payload, dist, sender)
     if not payload or payload == "" then return end
     MarkAlive(sender)
 
+    -- Server may inject hardcore prefix even into addon messages
+    payload = _StripChatPrefix(payload)
     local code = payload:sub(1, 3)
     if code == "REQ" then
         HandleAddonREQ(payload, sender)
@@ -721,10 +733,17 @@ function EbonBuilds.Sync.Init()
             if entry.target and entry.target ~= "" and entry.payload then
                 local blocked = failedTargets[entry.target]
                 local tally = sendTally[entry.target] or 0
-                if (blocked and now < blocked) or tally >= MAX_CONSECUTIVE_SENDS then
-                    -- Drop silently — target was detected offline or exceeded send limit
+                if (blocked and now < blocked) then
+                    VerboseLog(string.format("Dropped msg for %s: target offline (blocked for %ds)",
+                        entry.target, math.ceil(blocked - now)))
+                elseif tally >= MAX_CONSECUTIVE_SENDS then
+                    VerboseLog(string.format("Dropped msg for %s: exceeded send cap (%d)",
+                        entry.target, tally))
                 else
                     if blocked then failedTargets[entry.target] = nil end
+                    local code = entry.payload:match("^(%a%a%a)|") or "?"
+                    VerboseLog(string.format("Sent %s to %s (%d bytes)",
+                        code, entry.target, #entry.payload))
                     SendAddonMessage(PREFIX, entry.payload, "WHISPER", entry.target)
                     sendTally[entry.target] = tally + 1
                 end
