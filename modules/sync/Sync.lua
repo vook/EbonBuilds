@@ -426,19 +426,14 @@ end
 -- Channel message handler (REQ via custom chat channel)
 ------------------------------------------------------------------------
 
-local function HandleChannelMessage(msg, sender, _, channelName, _, _, channelNumber)
-    -- Skip channels whose name we CAN validate as not being the sync channel.
-    -- Some servers return slot IDs (e.g. "4") instead of readable names
-    -- (e.g. "ebonbuildssync"). In that case IsSyncChannelName would reject
-    -- every channel, so we fall through to content-based filtering below.
-    if IsSyncChannelName(channelName) then
-        -- channelName is readable and matched — definitely our channel
-    elseif type(channelName) == "string" and channelName ~= "" then
-        -- channelName is a string but not a match (e.g. "General" on retail,
-        -- or a slot ID on servers that return numbers). Only way to know is
-        -- to inspect the message content.
-    else
-        return  -- nil / empty channelName, ignore
+local function HandleChannelMessage(msg, sender, _, channelName, _, _, _, channelNumber)
+    -- CHAT_MSG_CHANNEL args: text, playerName, language, channelName,
+    --   playerName2, specialFlag, zoneChannelID, channelIndex, channelBaseName.
+    -- channelNumber = arg8 (channelIndex), arg5-7 skipped via _ placeholders.
+    -- channelName may be a name string, slot ID string, or slot ID number
+    -- depending on server — accept anything non-nil and non-empty.
+    if not channelName or channelName == "" then
+        return
     end
 
     MarkAlive(sender)
