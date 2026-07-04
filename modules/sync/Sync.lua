@@ -410,17 +410,25 @@ local function HandleRequest(requester)
     SendNextBatch(requester)
 end
 
--- WoW 3.3.5a chat messages can carry server-injected prefixes (e.g. Ebonhold
--- hardcore tier markers like "|cffff0000[HCIV]|r"). Rather than guess the
--- prefix format, strip all colour escapes then jump to the REQ| marker.
+-- Messages (both visible chat and SendAddonMessage) can carry server-injected
+-- prefixes (e.g. Ebonhold hardcore tier markers like "|cffff0000[HCIV]|r").
+-- Strip all colour escapes then search the header (first 60 chars) for a
+-- protocol code marker. Limit the search to avoid false positives on base64
+-- data that may randomly contain code-like byte sequences.
+local PROTOCOL_CODES = { "REQ", "LST", "WNT", "SKP", "BLD", "END" }
+local STRIP_SEARCH_LIMIT = 60
 local function _StripChatPrefix(msg)
 -- Exported as EbonBuilds.Sync._StripChatPrefix for unit tests
 	-- Remove WoW colour escape sequences: |cAARRGGBB and |r
 	local stripped = msg:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
-	-- Find the REQ| protocol marker — everything before it is a server prefix
-	local pos = stripped:find("REQ|", 1, true)
-	if pos and pos > 1 then
-		return stripped:sub(pos)
+	-- Search the header portion only — server prefixes are short (<20 chars);
+	-- base64 data that might randomly match a code lives much deeper.
+	local header = stripped:sub(1, STRIP_SEARCH_LIMIT)
+	for _, code in ipairs(PROTOCOL_CODES) do
+		local pos = header:find(code .. "|", 1, true)
+		if pos and pos > 1 then
+			return stripped:sub(pos)
+		end
 	end
 	return stripped
 end
@@ -598,6 +606,8 @@ local function DispatchAddon(prefix, payload, dist, sender)
     if not payload or payload == "" then return end
     MarkAlive(sender)
 
+    -- Server may inject hardcore prefix even into addon messages
+    payload = _StripChatPrefix(payload)
     local code = payload:sub(1, 3)
     if code == "REQ" then
         HandleAddonREQ(payload, sender)
