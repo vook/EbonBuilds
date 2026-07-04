@@ -20,9 +20,9 @@ local WANT_TIMEOUT  = 15
 local REQ_COOLDOWN  = 30
 local OFFLINE_COOLDOWN        = 60  -- seconds to block re-sends to a target detected as offline
 local MAX_QUEUE_SIZE          = 500 -- safety cap to prevent unbounded queue growth
-local MAX_CONSECUTIVE_SENDS   = 100 -- max sends to a target without receiving a response.
-                                    -- Must be high enough to cover 1 LST + (3 builds × ~30 BLD
-                                    -- chunks each worst-case) + 1 END = ~92 messages per batch.
+local MAX_CONSECUTIVE_SENDS   = 200 -- max sends to a target without receiving a response.
+                                    -- Covers worst-case batch: 1 LST + (3 builds × ~60 BLD
+                                    -- chunks for a 10 KB export) + 1 END = ~182 messages.
 
 -- Bump this to invalidate remote builds from older addon versions.
 -- Only affects builds that have NOT been imported — imported builds stay.
