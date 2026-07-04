@@ -332,6 +332,8 @@ local function SendNextBatch(requester)
         parts[#parts + 1] = tostring(DateToEpoch(b.lastModified))
     end
     Enqueue(requester, table.concat(parts, "|"))
+    VerboseLog(string.format("LST batch %s enqueued for %s (%d builds)",
+        pb.current .. "/" .. pb.totalBatches, requester, finish - start + 1))
 end
 
 local function SendBatchBuilds(requester, wantedUuids)
@@ -348,6 +350,8 @@ local function SendBatchBuilds(requester, wantedUuids)
         if wanted[b.id] then
             local b64 = EbonBuilds.ExportImport.ExportBuild(b)
             if b64 then
+                VerboseLog(string.format("BLD enqueued for %s: %s (%d bytes)",
+                    requester, b.id, #b64))
                 SendChunked(requester, "BLD", b.id, b64)
                 pb.sent = pb.sent + 1
             end
@@ -412,24 +416,14 @@ end
 
 -- Messages (both visible chat and SendAddonMessage) can carry server-injected
 -- prefixes (e.g. Ebonhold hardcore tier markers like "|cffff0000[HCIV]|r").
--- Strip all colour escapes then search the header (first 60 chars) for a
--- protocol code marker. Limit the search to avoid false positives on base64
--- data that may randomly contain code-like byte sequences.
-local PROTOCOL_CODES = { "REQ", "LST", "WNT", "SKP", "BLD", "END" }
-local STRIP_SEARCH_LIMIT = 60
+-- Strip WoW colour escapes, then remove any bracket-enclosed prefix at the
+-- start (handles [HCI] through [HCX] and any future server-injected tag).
 local function _StripChatPrefix(msg)
 -- Exported as EbonBuilds.Sync._StripChatPrefix for unit tests
-	-- Remove WoW colour escape sequences: |cAARRGGBB and |r
-	local stripped = msg:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
-	-- Search the header portion only — server prefixes are short (<20 chars);
-	-- base64 data that might randomly match a code lives much deeper.
-	local header = stripped:sub(1, STRIP_SEARCH_LIMIT)
-	for _, code in ipairs(PROTOCOL_CODES) do
-		local pos = header:find(code .. "|", 1, true)
-		if pos and pos > 1 then
-			return stripped:sub(pos)
-		end
-	end
+	-- Remove WoW colour escape sequences: |c + hex digits + |r
+	local stripped = msg:gsub("|c%x+", ""):gsub("|r", "")
+	-- Remove bracket-enclosed server prefix at start: [HCIV], [HCI], etc.
+	stripped = stripped:gsub("^%s*%[[^%]]+%]%s*", "")
 	return stripped
 end
 
@@ -516,6 +510,7 @@ end
 
 local function HandleListBatch(payload, sender)
     -- payload: "LST|sender|batch/total|uuid1|epoch1|uuid2|epoch2|..."
+    VerboseLog(string.format("LST received from %s", sender))
     local parts = {strsplit("|", payload)}
     if #parts < 4 then return end
 
@@ -553,9 +548,11 @@ local function HandleListBatch(payload, sender)
     end
 
     if #wanted == 0 then
+        VerboseLog(string.format("SKP enqueued for %s (nothing wanted)", sender))
         local skipPayload = string.format("SKP|%s", UnitName("player"))
         Enqueue(sender, skipPayload)
     else
+        VerboseLog(string.format("WNT enqueued for %s: %d builds", sender, #wanted))
         local wantParts = { "WNT", UnitName("player") }
         for _, uuid in ipairs(wanted) do
             wantParts[#wantParts + 1] = uuid
@@ -566,6 +563,7 @@ end
 
 local function HandleWant(payload, sender)
     -- payload: "WNT|requester|uuid1|uuid2|..."
+    VerboseLog(string.format("WNT received from %s", sender))
     local parts = {strsplit("|", payload)}
     if parts[1] ~= "WNT" then return end
     local wantedUuids = {}
@@ -576,6 +574,7 @@ local function HandleWant(payload, sender)
 end
 
 local function HandleSkip(payload, sender)
+    VerboseLog(string.format("SKP received from %s", sender))
     SendBatchBuilds(sender, {})  -- empty = skip all in current batch
 end
 
@@ -729,10 +728,17 @@ function EbonBuilds.Sync.Init()
             if entry.target and entry.target ~= "" and entry.payload then
                 local blocked = failedTargets[entry.target]
                 local tally = sendTally[entry.target] or 0
-                if (blocked and now < blocked) or tally >= MAX_CONSECUTIVE_SENDS then
-                    -- Drop silently — target was detected offline or exceeded send limit
+                if (blocked and now < blocked) then
+                    VerboseLog(string.format("Dropped msg for %s: target offline (blocked for %ds)",
+                        entry.target, math.ceil(blocked - now)))
+                elseif tally >= MAX_CONSECUTIVE_SENDS then
+                    VerboseLog(string.format("Dropped msg for %s: exceeded send cap (%d)",
+                        entry.target, tally))
                 else
                     if blocked then failedTargets[entry.target] = nil end
+                    local code = entry.payload:match("^(%a%a%a)|") or "?"
+                    VerboseLog(string.format("Sent %s to %s (%d bytes)",
+                        code, entry.target, #entry.payload))
                     SendAddonMessage(PREFIX, entry.payload, "WHISPER", entry.target)
                     sendTally[entry.target] = tally + 1
                 end
