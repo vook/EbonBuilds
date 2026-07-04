@@ -78,3 +78,20 @@ end
 function TestSyncStripPrefix.testMultipleColourCodes()
     assertEquals(S("|cffff0000|r|cff00ff00[HCIII]|r REQ|Multi"), "REQ|Multi")
 end
+
+function TestSyncStripPrefix.testUnknownPrefixFormat()
+    -- New approach finds REQ| marker regardless of prefix shape
+    assertEquals(S("|cffFF0000[SOMETHING_UNKNOWN]|r REQ|Vookan"), "REQ|Vookan")
+end
+
+function TestSyncStripPrefix.testEbonholdExactFormat()
+    -- Exact format reported: [1] [Tangjiwl]: [HCIV] REQ|Tangjiwl
+    -- Channel number and sender tag are NOT in the raw msg arg — but if they were,
+    -- the find-REQ approach would handle it.
+    assertEquals(S("[HCIV] REQ|Tangjiwl"), "REQ|Tangjiwl")
+end
+
+function TestSyncStripPrefix.testColourWithHCIVNoPipe()
+    -- Colour strip must not mangle the pipe that follows the prefix
+    assertEquals(S("|cffff0000[HCIV]|r REQ|Tangjiwl"), "REQ|Tangjiwl")
+end

@@ -411,14 +411,17 @@ local function HandleRequest(requester)
 end
 
 -- WoW 3.3.5a chat messages can carry server-injected prefixes (e.g. Ebonhold
--- hardcore tier markers like "|cffff0000[HCIV]|r"). Strip them before parsing
--- so they don't break the pipe-delimited protocol.
+-- hardcore tier markers like "|cffff0000[HCIV]|r"). Rather than guess the
+-- prefix format, strip all colour escapes then jump to the REQ| marker.
 local function _StripChatPrefix(msg)
 -- Exported as EbonBuilds.Sync._StripChatPrefix for unit tests
 	-- Remove WoW colour escape sequences: |cAARRGGBB and |r
 	local stripped = msg:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
-	-- Remove hardcore prefix like [HCI], [HCII], [HCIII], [HCIV], ...
-	stripped = stripped:gsub("^%s*%[HC[IVX]+%]%s*", "")
+	-- Find the REQ| protocol marker — everything before it is a server prefix
+	local pos = stripped:find("REQ|", 1, true)
+	if pos and pos > 1 then
+		return stripped:sub(pos)
+	end
 	return stripped
 end
 
