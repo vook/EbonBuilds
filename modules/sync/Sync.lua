@@ -410,6 +410,18 @@ local function HandleRequest(requester)
     SendNextBatch(requester)
 end
 
+-- WoW 3.3.5a chat messages can carry server-injected prefixes (e.g. Ebonhold
+-- hardcore tier markers like "|cffff0000[HCIV]|r"). Strip them before parsing
+-- so they don't break the pipe-delimited protocol.
+local function _StripChatPrefix(msg)
+-- Exported as EbonBuilds.Sync._StripChatPrefix for unit tests
+	-- Remove WoW colour escape sequences: |cAARRGGBB and |r
+	local stripped = msg:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+	-- Remove hardcore prefix like [HCI], [HCII], [HCIII], [HCIV], ...
+	stripped = stripped:gsub("^%s*%[HC[IVX]+%]%s*", "")
+	return stripped
+end
+
 ------------------------------------------------------------------------
 -- Channel message handler (REQ via custom chat channel)
 ------------------------------------------------------------------------
@@ -432,6 +444,7 @@ local function HandleChannelMessage(msg, sender, _, channelName, _, _, channelNu
     MarkAlive(sender)
 
     local decoded = msg:gsub("||", "|")
+    decoded = _StripChatPrefix(decoded)
     local parts = {strsplit("|", decoded)}
     local code = parts[1]
     if code ~= "REQ" then return end
@@ -606,6 +619,9 @@ end
 ------------------------------------------------------------------------
 -- Public API
 ------------------------------------------------------------------------
+
+-- Internal export for unit tests
+EbonBuilds.Sync._StripChatPrefix = _StripChatPrefix
 
 function EbonBuilds.Sync.GetCooldownRemaining()
     local elapsed = Now() - lastRequestTime
