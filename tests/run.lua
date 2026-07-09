@@ -28,6 +28,7 @@ dofile(P("tests/test_scoring.lua"))
 dofile(P("tests/test_build.lua"))
 dofile(P("tests/test_automation.lua"))
 dofile(P("tests/test_sync.lua"))
+dofile(P("tests/test_echo_ownership.lua"))
 
 -- 4. Run all tests
 print("\n" .. string.rep("=", 60))

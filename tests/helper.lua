@@ -26,6 +26,8 @@ _G.EbonBuilds.EchoTable = _G.EbonBuilds.EchoTable or {}
 if not _G.EbonBuilds.EchoTableRows then
     _G.EbonBuilds.EchoTableRows = {
         BuildSortedList = function() return {} end,
+        InvalidateCaches = function() end,
+        InvalidateTomeCache = function() end,
     }
 end
 if not _G.EbonBuilds.Weights then
@@ -33,6 +35,7 @@ if not _G.EbonBuilds.Weights then
 end
 
 -- 4. Load addon source modules in dependency order
+dofile(addonPath("modules/data/EchoOwnership.lua"))
 dofile(addonPath("modules/build/Build.lua"))
 dofile(addonPath("modules/build/ExportImport.lua"))
 dofile(addonPath("modules/build/Scoring.lua"))

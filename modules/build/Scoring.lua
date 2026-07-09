@@ -137,8 +137,16 @@ local function StripQualitySuffix(name)
     return name
 end
 
+local function GetPerkDatabase()
+    if EbonBuilds.EchoOwnership and EbonBuilds.EchoOwnership.GetPerkDatabase then
+        return EbonBuilds.EchoOwnership.GetPerkDatabase()
+    end
+    return ProjectEbonhold and ProjectEbonhold.PerkDatabase
+end
+
 local function ResolveEchoDisplayName(spellId, fallbackName)
-    local data = ProjectEbonhold.PerkDatabase and ProjectEbonhold.PerkDatabase[spellId]
+    local db = GetPerkDatabase()
+    local data = db and db[spellId]
     if data and data.comment and data.comment ~= "" then
         return StripQualitySuffix(data.comment)
     end
@@ -155,8 +163,9 @@ function EbonBuilds.Scoring.ResolveEchoDisplayName(spellId, fallbackName)
 end
 
 function EbonBuilds.Scoring.GetEchoFamilyKey(spellId, displayName)
-    if spellId and ProjectEbonhold and ProjectEbonhold.PerkDatabase then
-        local data = ProjectEbonhold.PerkDatabase[spellId]
+    local db = GetPerkDatabase()
+    if spellId and db then
+        local data = db[spellId]
         if data and data.groupId then
             return "g:" .. tostring(data.groupId)
         end
@@ -169,8 +178,9 @@ end
 function EbonBuilds.Scoring.GetHighestPickedQuality(displayName, spellId, granted)
     local targetKey = displayName and string.lower(displayName)
     local targetGroupId
-    if spellId and ProjectEbonhold and ProjectEbonhold.PerkDatabase then
-        local data = ProjectEbonhold.PerkDatabase[spellId]
+    local db = GetPerkDatabase()
+    if spellId and db then
+        local data = db[spellId]
         targetGroupId = data and data.groupId
     end
     local best
@@ -182,14 +192,14 @@ function EbonBuilds.Scoring.GetHighestPickedQuality(displayName, spellId, grante
                     local instName = ResolveEchoDisplayName(sid, key)
                     local sameEcho = targetKey and instName and string.lower(instName) == targetKey
                     local sameGroup = false
-                    if targetGroupId and ProjectEbonhold.PerkDatabase then
-                        local instData = ProjectEbonhold.PerkDatabase[sid]
+                    if targetGroupId and db then
+                        local instData = db[sid]
                         sameGroup = instData and instData.groupId == targetGroupId
                     end
                     if sameEcho or sameGroup then
                         local q = inst.quality
-                        if q == nil and ProjectEbonhold.PerkDatabase then
-                            q = ProjectEbonhold.PerkDatabase[sid] and ProjectEbonhold.PerkDatabase[sid].quality or 0
+                        if q == nil and db then
+                            q = db[sid] and db[sid].quality or 0
                         end
                         if q and (not best or q > best) then best = q end
                     end
