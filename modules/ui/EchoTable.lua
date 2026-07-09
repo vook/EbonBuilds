@@ -247,12 +247,12 @@ local function CreateHeaders(parent, top)
     C.AnchorColumnRight(tomeHdr, row, C.INSET_TOME, C.COL_TOME)
     local tomeLabel = tomeHdr:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     tomeLabel:SetPoint("CENTER", tomeHdr, "CENTER", 0, 0)
-    tomeLabel:SetText("Tome")
+    tomeLabel:SetText("Owned")
     tomeLabel:SetTextColor(0.6, 0.6, 0.6)
     tomeHdr:EnableMouse(true)
     tomeHdr:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-        GameTooltip:SetText("Tome Owned", 1, 0.82, 0)
+        GameTooltip:SetText("Owned", 1, 0.82, 0)
         GameTooltip:AddLine("Checked when the echo's discovery tome is in your spellbook.", 0.8, 0.8, 0.8, true)
         GameTooltip:Show()
     end)
@@ -431,9 +431,6 @@ function EbonBuilds.EchoTable.Init(parent)
     EbonBuilds.EchoTableRows.SetOnWeightChanged(function()
         if EbonBuilds.Scoring and EbonBuilds.Scoring.ResetCache then
             EbonBuilds.Scoring.ResetCache()
-        end
-        if EbonBuilds.PlayerRunScore and EbonBuilds.PlayerRunScore.Invalidate then
-            EbonBuilds.PlayerRunScore.Invalidate()
         end
         if sortMode == "name" then
             RefreshRows()

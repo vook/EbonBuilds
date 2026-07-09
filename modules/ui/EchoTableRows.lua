@@ -89,9 +89,18 @@ local function StripQualitySuffix(name)
     return name
 end
 
+local function GetPerkDatabase()
+    if EbonBuilds.EchoOwnership and EbonBuilds.EchoOwnership.GetPerkDatabase then
+        return EbonBuilds.EchoOwnership.GetPerkDatabase()
+    end
+    return ProjectEbonhold and ProjectEbonhold.PerkDatabase
+end
+
 local function BuildBestByName()
     local best = {}
-    for spellId, data in pairs(ProjectEbonhold.PerkDatabase) do
+    local db = GetPerkDatabase()
+    if not db then return best end
+    for spellId, data in pairs(db) do
         local raw = data.comment
         if raw and raw ~= "" then
             local name = StripQualitySuffix(raw)
@@ -185,11 +194,14 @@ function EbonBuilds.EchoTableRows.IsTomeInSpellbook(tomeSpellId)
     return known
 end
 
--- Run score / missing targets: echoes that need a tome count only when that tome is in the spellbook.
+-- Missing targets: echoes that need a tome count only when that echo is account-owned.
 function EbonBuilds.EchoTableRows.IsEchoTomeOwnedForRun(name)
     if not name then return true end
     local entry = GetBestByName()[name]
     if not entry or not entry.requiresTome then return true end
+    if EbonBuilds.EchoOwnership then
+        return EbonBuilds.EchoOwnership.IsEchoRollable(name, entry.tomeSpellId)
+    end
     local tomeId = entry.tomeSpellId
     if not tomeId or tomeId == 0 or tomeId == 9 then return false end
     return EbonBuilds.EchoTableRows.IsTomeInSpellbook(tomeId)
@@ -314,7 +326,9 @@ end
 
 function EbonBuilds.EchoTableRows.BuildAllQualitiesList()
     local list = {}
-    for spellId, data in pairs(ProjectEbonhold.PerkDatabase) do
+    local db = GetPerkDatabase()
+    if not db then return list end
+    for spellId, data in pairs(db) do
         local raw = data.comment
         if raw and raw ~= "" then
             local name = StripQualitySuffix(raw)
@@ -340,7 +354,8 @@ local PICKER_CLASS_BITS = {
 
 function EbonBuilds.EchoTableRows.GetDisplayNameForSpellId(spellId)
     if not spellId then return nil end
-    local data = ProjectEbonhold.PerkDatabase and ProjectEbonhold.PerkDatabase[spellId]
+    local db = GetPerkDatabase()
+    local data = db and db[spellId]
     if data and data.comment and data.comment ~= "" then
         return StripQualitySuffix(data.comment)
     end
@@ -375,7 +390,9 @@ function EbonBuilds.EchoTableRows.BuildPickerList(opts)
     end
 
     local byName = {}
-    for spellId, data in pairs(ProjectEbonhold.PerkDatabase) do
+    local db = GetPerkDatabase()
+    if not db then return {} end
+    for spellId, data in pairs(db) do
         if not excludeSpellIds[spellId]
             and data.comment and data.comment ~= "" then
             local name = StripQualitySuffix(data.comment)
@@ -494,19 +511,45 @@ local function CreatePolicyDropdown(row)
 end
 
 local function CreateTomeOwnedDisplay(row)
-    return nil
+    return EbonBuilds.EchoTableRows.CreateTomeOwnedDisplay(row)
 end
 
-function EbonBuilds.EchoTableRows.SyncTomeOwnedDisplay(frame, tomeSpellId)
+function EbonBuilds.EchoTableRows.SyncTomeOwnedDisplay(frame, arg)
     if not frame then return end
+
+    local tomeSpellId, owned, name, spellId, groupId, spellIds
+    if type(arg) == "table" then
+        tomeSpellId = arg.tomeSpellId
+        owned = arg.owned
+        name = arg.name
+        spellId = arg.spellId
+        groupId = arg.groupId
+        spellIds = arg.spellIds
+    else
+        tomeSpellId = arg
+    end
+
     frame._tomeSpellId = tomeSpellId
+    frame._echoName = name
+    frame._echoSpellId = spellId
+    frame._echoGroupId = groupId
+    frame._echoSpellIds = spellIds
+
     if not tomeSpellId or tomeSpellId == 9 then
         frame:Hide()
         return
     end
     frame:Show()
     frame._bg:Show()
-    if EbonBuilds.EchoTableRows.IsTomeInSpellbook(tomeSpellId) then
+
+    if owned == nil and EbonBuilds.EchoOwnership then
+        owned = EbonBuilds.EchoOwnership.IsAccountOwned(name, spellIds, groupId, spellId)
+    elseif owned == nil then
+        owned = EbonBuilds.EchoTableRows.IsTomeInSpellbook(tomeSpellId)
+    end
+    frame._owned = owned
+
+    if owned then
         frame._check:Show()
     else
         frame._check:Hide()
@@ -548,16 +591,18 @@ function EbonBuilds.EchoTableRows.CreateTomeOwnedDisplay(row, opts)
     frame:SetScript("OnEnter", function(self)
         if not self._tomeSpellId then return end
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:SetText("Tome Owned", 1, 0.82, 0)
-        local tomeName = GetSpellInfo(self._tomeSpellId)
-        if EbonBuilds.EchoTableRows.IsTomeInSpellbook(self._tomeSpellId) then
-            GameTooltip:AddLine(
-                tomeName and (tomeName .. " is in your spellbook.") or "Tome is in your spellbook.",
-                0.5, 1, 0.5, true)
+        GameTooltip:SetText("Owned", 1, 0.82, 0)
+        local owned = self._owned
+        if owned == nil and EbonBuilds.EchoOwnership then
+            owned = EbonBuilds.EchoOwnership.IsAccountOwned(
+                self._echoName, self._echoSpellIds, self._echoGroupId, self._echoSpellId)
+        elseif owned == nil then
+            owned = EbonBuilds.EchoTableRows.IsTomeInSpellbook(self._tomeSpellId)
+        end
+        if owned then
+            GameTooltip:AddLine("Discovered on this account.", 0.5, 1, 0.5, true)
         else
-            GameTooltip:AddLine(
-                tomeName and (tomeName .. " is not in your spellbook.") or "Tome is not in your spellbook.",
-                0.8, 0.8, 0.8, true)
+            GameTooltip:AddLine("Not yet discovered on this account.", 0.8, 0.8, 0.8, true)
         end
         GameTooltip:Show()
     end)
@@ -1083,7 +1128,13 @@ function EbonBuilds.EchoTableRows.Populate(row, yOffset, entry)
             row.policyDd:Show()
         end
         if row.tomeOwned then
-            EbonBuilds.EchoTableRows.SyncTomeOwnedDisplay(row.tomeOwned, entry.tomeSpellId)
+            EbonBuilds.EchoTableRows.SyncTomeOwnedDisplay(row.tomeOwned, {
+                name = entry.name,
+                spellId = entry.spellId,
+                spellIds = entry.spellIds,
+                groupId = entry.groupId,
+                tomeSpellId = entry.tomeSpellId,
+            })
         end
         WireRowEchoTooltip(row, entry)
         UpdateSingleRowScore(row, entry)
@@ -1102,7 +1153,13 @@ function EbonBuilds.EchoTableRows.Populate(row, yOffset, entry)
             row.policyDd:Show()
         end
         if row.tomeOwned then
-            EbonBuilds.EchoTableRows.SyncTomeOwnedDisplay(row.tomeOwned, entry.tomeSpellId)
+            EbonBuilds.EchoTableRows.SyncTomeOwnedDisplay(row.tomeOwned, {
+                name = entry.name,
+                spellId = entry.spellId,
+                spellIds = entry.spellIds,
+                groupId = entry.groupId,
+                tomeSpellId = entry.tomeSpellId,
+            })
         end
         row._qualities = entry.qualities
         row._families  = entry.families
