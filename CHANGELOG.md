@@ -16,3 +16,12 @@ All notable changes to EbonBuilds are documented in this file.
 ### Tome owned column
 - Echoes weight table shows whether each echo is learned on your account (tome owned).
 - Shared column layout extracted to `EchoTableColumns` for consistent headers.
+
+### Echo policies
+- Per-echo automation policies: Normal, Ban 1st seen, Ban after pick, Ignore after pick, Never pick.
+- Policy dropdown in the echoes editor; legacy `noveltyBanishList` migrates automatically.
+- Automation scoring and selection honor policy flags.
+- Auto-reroll uses best pickable echo score (not sum of all offers); **Reroll guard %** restored to block rerolls when any single offer scores above the guard.
+
+### Policies overview tab
+- Dedicated **Policies** tab lists echoes with non-default policies for quick review and edits.
