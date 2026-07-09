@@ -34,6 +34,9 @@ function EbonBuilds.AnvilIntegration.IsOpen()
 end
 
 function EbonBuilds.AnvilIntegration.EnsureOpen()
+    if AutoAnvil and AutoAnvil.ResetDismiss then
+        AutoAnvil.ResetDismiss()
+    end
     if EbonBuilds.AnvilIntegration.IsOpen() then
         return true
     end
@@ -87,14 +90,141 @@ local function FindAnvilTitle(frame)
     return found
 end
 
+local CLOSE_TEXTURE_HINTS = {
+    "UI%-Panel%-Close",
+    "UI%-Panel%-Minimize",
+    "UI%-Panel%-Hide",
+    "CloseButton",
+}
+
+local KNOWN_CLOSE_BUTTON_NAMES = {
+    "EbonholdExtractionFrameClose",
+    "EbonholdExtractionCloseButton",
+}
+
+local function IsCloseButton(btn)
+    if not btn or btn.GetObjectType == nil or btn:GetObjectType() ~= "Button" then
+        return false
+    end
+    local name = btn.GetName and btn:GetName() or ""
+    if name:find("Close", 1, true) then
+        return true
+    end
+    local w, h = btn.GetWidth and btn:GetWidth() or 0, btn.GetHeight and btn:GetHeight() or 0
+    if w > 36 or h > 36 then
+        return false
+    end
+    local tex = btn.GetNormalTexture and btn:GetNormalTexture()
+    if tex and tex.GetTexture then
+        local path = tex:GetTexture() or ""
+        for _, pattern in ipairs(CLOSE_TEXTURE_HINTS) do
+            if path:find(pattern) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function FindPanelCloseButton(frame)
+    if not frame then return nil end
+
+    for _, globalName in ipairs(KNOWN_CLOSE_BUTTON_NAMES) do
+        local btn = _G[globalName]
+        if btn and btn.GetParent and btn:GetParent() == frame and IsCloseButton(btn) then
+            return btn
+        end
+    end
+
+    for _, key in ipairs({ "closeButton", "CloseButton", "closeBtn", "Close" }) do
+        local btn = frame[key]
+        if btn and IsCloseButton(btn) then
+            return btn
+        end
+    end
+
+    local numRegions = frame.GetNumRegions and frame:GetNumRegions() or 0
+    for i = 1, numRegions do
+        local region = select(i, frame:GetRegions())
+        if IsCloseButton(region) then
+            return region
+        end
+    end
+
+    if not frame.GetNumChildren then return nil end
+    for i = 1, frame:GetNumChildren() do
+        local child = select(i, frame:GetChildren())
+        if child then
+            if IsCloseButton(child) then
+                return child
+            end
+            local nested = FindPanelCloseButton(child)
+            if nested then return nested end
+        end
+    end
+    return nil
+end
+
+local function MarkAnvilDismissed()
+    if AutoAnvil and AutoAnvil.ClearKeepOpen then
+        AutoAnvil.ClearKeepOpen()
+    end
+end
+
+local function BindCloseButtonDismiss(closeBtn)
+    if not closeBtn or closeBtn._ebonBuildsDismissBound then
+        return
+    end
+    closeBtn._ebonBuildsDismissBound = true
+
+    if closeBtn.HookScript then
+        closeBtn:HookScript("OnMouseDown", MarkAnvilDismissed)
+        closeBtn:HookScript("OnClick", MarkAnvilDismissed)
+    end
+
+    if closeBtn.SetScript then
+        local priorDown = closeBtn:GetScript("OnMouseDown")
+        closeBtn:SetScript("OnMouseDown", function(self, button, ...)
+            MarkAnvilDismissed()
+            if priorDown then
+                return priorDown(self, button, ...)
+            end
+        end)
+
+        local priorClick = closeBtn:GetScript("OnClick")
+        closeBtn:SetScript("OnClick", function(self, button, ...)
+            MarkAnvilDismissed()
+            if priorClick then
+                return priorClick(self, button, ...)
+            end
+        end)
+    end
+end
+
+local function HookAnvilCloseButton(frame)
+    if not frame or frame._ebonBuildsCloseHooked then return end
+    frame._ebonBuildsCloseHooked = true
+    BindCloseButtonDismiss(FindPanelCloseButton(frame))
+end
+
 local function RegisterBagDeferral(frame)
-    if not frame or frame._ebonBuildsBagDeferRegistered then
+    if not frame or frame._ebonBuildsBagDeferRegistered
+        or frame._autoAnvilBagDeferRegistered then
+        if frame._autoAnvilBagDeferRegistered then
+            frame._ebonBuildsBagDeferRegistered = true
+        end
         return
     end
     local utils = ProjectEbonhold and ProjectEbonhold.utils
     if utils and utils.RegisterFrameBelowBagsWhenOpen then
         utils.RegisterFrameBelowBagsWhenOpen(frame)
         frame._ebonBuildsBagDeferRegistered = true
+    end
+end
+
+local function ResetAnvilDismiss()
+    if AutoAnvil and AutoAnvil.ResetDismiss then
+        AutoAnvil.ResetDismiss()
     end
 end
 
@@ -152,6 +282,7 @@ local function RefreshAnvilUI(frame)
     frame = frame or GetAnvilFrame()
     if not frame or not frame:IsShown() then return end
     if not EnsureAnvilButton() then return end
+    BindCloseButtonDismiss(FindPanelCloseButton(frame))
     LayoutAnvilButton(frame)
     RefreshAnvilApplyButton()
 end
@@ -237,6 +368,7 @@ EnsureAnvilButton = function()
     RegisterBagDeferral(frame)
     ResetLegacyFrameHeight(frame)
     CreateApplyButton(frame)
+    HookAnvilCloseButton(frame)
     HookFrameShowHide(frame)
     LayoutAnvilButton(frame)
     applyBtn:Show()
@@ -265,7 +397,11 @@ local function HookExtractionToggle()
     toggleHooked = true
     if hooksecurefunc then
         hooksecurefunc(ExtractionUI, "Toggle", function()
-            ScheduleAnvilRefresh(GetAnvilFrame())
+            local frame = GetAnvilFrame()
+            if frame and frame.IsShown and frame:IsShown() then
+                ResetAnvilDismiss()
+            end
+            ScheduleAnvilRefresh(frame)
         end)
     else
         local origToggle = ExtractionUI.Toggle
@@ -293,6 +429,7 @@ local function RegisterEventHooks()
             if GossipFrameNpcNameText then
                 local npcName = GossipFrameNpcNameText:GetText()
                 if npcName == "Enchanted Anvil" then
+                    ResetAnvilDismiss()
                     if C_Timer and C_Timer.After then
                         C_Timer.After(0.05, OnAnvilMaybeOpened)
                     else
