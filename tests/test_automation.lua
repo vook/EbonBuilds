@@ -202,3 +202,62 @@ function TestAnnotate.testLockedEchoFlag()
     assertFalse(scored[1].isLocked)
     assertTrue(scored[2].isLocked, "Brutal (200200) should be flagged as locked")
 end
+
+------------------------------------------------------------------------
+-- BestRemainingScore: reroll uses best pickable, not sum of all offers
+------------------------------------------------------------------------
+
+TestRerollScore = {}
+
+function TestRerollScore.testBestRemainingIgnoresWeakWhenOneStrongPickable()
+    local settings = EbonBuilds.Build.DefaultSettings()
+    local banList = {}
+    local scored = {
+        { index = 1, spellId = 1, name = "Weak A", score = 10, isFrozen = false, isCarried = false, isProtected = false },
+        { index = 2, spellId = 2, name = "Weak B", score = 12, isFrozen = false, isCarried = false, isProtected = false },
+        { index = 3, spellId = 3, name = "Strong", score = 95, isFrozen = false, isCarried = false, isProtected = false },
+    }
+    local best = EbonBuilds.Automation._BestRemainingScore(scored, settings, banList, 100, {}, scored)
+    assertEquals(best, 95)
+    local sum = 10 + 12 + 95
+    assertTrue(best < sum, "Reroll should not use the sum of all three scores")
+end
+
+function TestRerollScore.testBestRemainingSkipsFrozenThisRound()
+    local settings = EbonBuilds.Build.DefaultSettings()
+    local banList = {}
+    local choices = {
+        { spellId = 1, isFrozen = true },
+        { spellId = 2, isFrozen = false },
+        { spellId = 3, isFrozen = false },
+    }
+    local scored = {
+        { index = 1, spellId = 1, name = "Frozen", score = 99, isFrozen = true, isCarried = false, isProtected = false },
+        { index = 2, spellId = 2, name = "Pickable", score = 40, isFrozen = false, isCarried = false, isProtected = false },
+        { index = 3, spellId = 3, name = "Also weak", score = 20, isFrozen = false, isCarried = false, isProtected = false },
+    }
+    local best = EbonBuilds.Automation._BestRemainingScore(scored, settings, banList, 100, {}, choices)
+    assertEquals(best, 40)
+end
+
+function TestRerollScore.testRerollGuardBlocksWhenAnyEchoAboveThreshold()
+    local settings = EbonBuilds.Build.DefaultSettings()
+    settings.rerollGuardPct = 90
+    local scored = {
+        { index = 1, spellId = 1, name = "Weak A", score = 10 },
+        { index = 2, spellId = 2, name = "Weak B", score = 12 },
+        { index = 3, spellId = 3, name = "Guarded", score = 91 },
+    }
+    assertTrue(EbonBuilds.Automation._IsBlockedByRerollGuard(scored, 100, settings))
+end
+
+function TestRerollScore.testRerollGuardAllowsWhenAllBelowThreshold()
+    local settings = EbonBuilds.Build.DefaultSettings()
+    settings.rerollGuardPct = 90
+    local scored = {
+        { index = 1, spellId = 1, name = "Weak A", score = 10 },
+        { index = 2, spellId = 2, name = "Weak B", score = 12 },
+        { index = 3, spellId = 3, name = "Also weak", score = 30 },
+    }
+    assertFalse(EbonBuilds.Automation._IsBlockedByRerollGuard(scored, 100, settings))
+end

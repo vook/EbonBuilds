@@ -21,6 +21,7 @@ local function DefaultSettings()
         noveltyValue     = 0,
         noveltyMode      = false,
         echoBanList      = {},
+        echoPolicies     = {},
         echoBanAllMode   = "highestScore",
     }
 end
@@ -44,6 +45,56 @@ local function EnsureSettings(build)
 end
 
 EbonBuilds.Build.EnsureSettings = EnsureSettings
+
+EbonBuilds.Build.POLICIES = {
+    { id = "normal",          title = "Normal",                 short = "Normal",       menuDesc = "Score by weight; novelty while unpicked.", desc = "Score by weight and bonuses. Novelty applies while the echo family is unpicked." },
+    { id = "ban1st",          title = "Banish on First Sight",  short = "Banish First", menuDesc = "Banish all rarities on first offer.", desc = "On first offer this run, banish the echo (all rarities). If no banishes remain, heavily deprioritize instead." },
+    { id = "banAfterPick",    title = "Banish After Pick",      short = "Banish After", menuDesc = "Banish low-tier re-offers after pick.", desc = "After you pick this echo, banish re-offers at or below your highest picked rarity." },
+    { id = "ignoreAfterPick", title = "Ignore After Pick",      short = "Ignore After", menuDesc = "Deprioritize Common/Uncommon after pick.", desc = "After you pick this echo, deprioritize Common and Uncommon re-offers. Rare+ still considered." },
+    { id = "neverPick",       title = "Never Pick",             short = "Never Pick",   menuDesc = "Never auto-pick.", desc = "Never auto-pick. May still be banished or rerolled by automation thresholds." },
+}
+
+local POLICY_BY_ID = {}
+for _, p in ipairs(EbonBuilds.Build.POLICIES) do
+    POLICY_BY_ID[p.id] = p
+end
+
+local NON_NORMAL_POLICIES = {}
+for _, p in ipairs(EbonBuilds.Build.POLICIES) do
+    if p.id ~= "normal" then NON_NORMAL_POLICIES[p.id] = true end
+end
+
+function EbonBuilds.Build.GetPolicyList()
+    return EbonBuilds.Build.POLICIES
+end
+
+function EbonBuilds.Build.GetEchoPolicyInfo(policy)
+    local p = POLICY_BY_ID[policy] or POLICY_BY_ID.normal
+    return { title = p.title, short = p.short, menuDesc = p.menuDesc, desc = p.desc }
+end
+
+function EbonBuilds.Build.GetEchoPolicy(echoName)
+    if not echoName then return "normal" end
+    local build = EbonBuilds.Build.GetActive()
+    if not build then return "normal" end
+    EnsureSettings(build)
+    local policy = build.settings.echoPolicies and build.settings.echoPolicies[echoName]
+    if policy and NON_NORMAL_POLICIES[policy] then return policy end
+    return "normal"
+end
+
+function EbonBuilds.Build.SetEchoPolicy(echoName, policy)
+    if not echoName then return end
+    local build = EbonBuilds.Build.GetActive()
+    if not build then return end
+    EnsureSettings(build)
+    build.settings.echoPolicies = build.settings.echoPolicies or {}
+    if not policy or policy == "normal" then
+        build.settings.echoPolicies[echoName] = nil
+    elseif NON_NORMAL_POLICIES[policy] then
+        build.settings.echoPolicies[echoName] = policy
+    end
+end
 
 local function CloneTable(t)
     if type(t) ~= "table" then return t end
