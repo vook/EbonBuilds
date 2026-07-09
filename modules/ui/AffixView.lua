@@ -183,11 +183,21 @@ local function EnsureAnvilForApply(thenFn)
     if EbonBuilds.AnvilIntegration and EbonBuilds.AnvilIntegration.EnsureOpen then
         EbonBuilds.AnvilIntegration.EnsureOpen()
     end
-    if C_Timer and C_Timer.After then
-        C_Timer.After(0.1, thenFn)
-    else
-        thenFn()
+    local delays = { 0.05, 0.2, 0.45 }
+    local function attempt(remaining)
+        if EbonBuilds.AnvilIntegration and EbonBuilds.AnvilIntegration.IsOpen
+            and EbonBuilds.AnvilIntegration.IsOpen() then
+            thenFn()
+            return
+        end
+        local nextDelay = table.remove(remaining, 1)
+        if nextDelay and C_Timer and C_Timer.After then
+            C_Timer.After(nextDelay, function() attempt(remaining) end)
+        else
+            thenFn()
+        end
     end
+    attempt(delays)
 end
 
 local function TryStartApplyFromPreview()

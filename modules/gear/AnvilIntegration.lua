@@ -4,14 +4,13 @@
 EbonBuilds.AnvilIntegration = {}
 
 local applyBtn
-local actionStrip
 local hookedFrame
 local toggleHooked = false
 local eventFrame
+local refreshFrame
 local EnsureAnvilButton
 
-local STRIP_HEIGHT = 24
-local GAP_BELOW_TITLE = 6
+local GAP_BELOW_TITLE = 4
 
 local function GetAnvilFrame()
     if _G.EbonholdExtractionFrame then
@@ -24,11 +23,14 @@ local function GetAnvilFrame()
 end
 
 function EbonBuilds.AnvilIntegration.IsOpen()
-    if ExtractionUI and ExtractionUI.IsOpen and ExtractionUI.IsOpen() then
+    local frame = GetAnvilFrame()
+    if frame and frame.IsShown and frame:IsShown() then
         return true
     end
-    local frame = GetAnvilFrame()
-    return frame and frame.IsShown and frame:IsShown()
+    if ExtractionUI and ExtractionUI.IsOpen then
+        return ExtractionUI.IsOpen()
+    end
+    return false
 end
 
 function EbonBuilds.AnvilIntegration.EnsureOpen()
@@ -41,22 +43,48 @@ function EbonBuilds.AnvilIntegration.EnsureOpen()
     return EbonBuilds.AnvilIntegration.IsOpen()
 end
 
-local function IsNativeAnvilReady()
-    if ExtractionUI and ExtractionUI._actionsLoaded then
-        return true
+local function VisitFontStrings(frame, visit, depth)
+    if not frame or depth > 4 then return false end
+    depth = depth or 0
+
+    local numRegions = frame.GetNumRegions and frame:GetNumRegions() or 0
+    for i = 1, numRegions do
+        local region = select(i, frame:GetRegions())
+        if region and region.GetObjectType and region:GetObjectType() == "FontString" then
+            if visit(region) then return true end
+        end
     end
-    return _G.EbonholdExtractionExtractBtn ~= nil and _G.EbonholdExtractionApplyBtn ~= nil
+
+    local numChildren = frame.GetNumChildren and frame:GetNumChildren() or 0
+    for i = 1, numChildren do
+        local child = select(i, frame:GetChildren())
+        if child and VisitFontStrings(child, visit, depth + 1) then
+            return true
+        end
+    end
+    return false
 end
 
-local function GetAnvilTitleAnchor(frame)
+local function FindAnvilTitle(frame)
     if not frame then return nil end
+
     for _, key in ipairs({ "title", "Title", "titleText", "TitleText", "header" }) do
         local region = frame[key]
         if region and region.GetObjectType and region:GetObjectType() == "FontString" then
             return region
         end
     end
-    return nil
+
+    local found
+    VisitFontStrings(frame, function(region)
+        local text = region.GetText and region:GetText()
+        if text and text:find("Enchanted Anvil", 1, true) then
+            found = region
+            return true
+        end
+        return false
+    end)
+    return found
 end
 
 local function RegisterBagDeferral(frame)
@@ -79,21 +107,18 @@ local function ResetLegacyFrameHeight(frame)
 end
 
 local function LayoutAnvilButton(frame)
-    if not frame or not actionStrip or not applyBtn then return end
+    if not frame or not applyBtn then return end
 
-    local titleAnchor = GetAnvilTitleAnchor(frame)
-    actionStrip:ClearAllPoints()
-    if titleAnchor then
-        actionStrip:SetPoint("TOP", titleAnchor, "BOTTOM", 0, -GAP_BELOW_TITLE)
-    else
-        actionStrip:SetPoint("TOP", frame, "TOP", 0, -34)
-    end
-    actionStrip:SetWidth(132)
-    actionStrip:SetHeight(STRIP_HEIGHT)
-
+    local titleAnchor = FindAnvilTitle(frame)
     applyBtn:ClearAllPoints()
+    if titleAnchor then
+        applyBtn:SetPoint("TOP", titleAnchor, "BOTTOM", 0, -GAP_BELOW_TITLE)
+    else
+        applyBtn:SetPoint("TOP", frame, "TOP", 0, -30)
+    end
     applyBtn:SetSize(130, 20)
-    applyBtn:SetPoint("CENTER", actionStrip, "CENTER", 0, 0)
+    applyBtn:SetFrameStrata(frame:GetFrameStrata() or "DIALOG")
+    applyBtn:SetFrameLevel((frame:GetFrameLevel() or 1) + 30)
 end
 
 local function RefreshAnvilApplyButton()
@@ -123,9 +148,31 @@ local function RefreshAnvilApplyButton()
     end
 end
 
-function EbonBuilds.AnvilIntegration.RefreshButton()
-    EnsureAnvilButton()
+local function RefreshAnvilUI(frame)
+    frame = frame or GetAnvilFrame()
+    if not frame or not frame:IsShown() then return end
+    if not EnsureAnvilButton() then return end
+    LayoutAnvilButton(frame)
     RefreshAnvilApplyButton()
+end
+
+function EbonBuilds.AnvilIntegration.RefreshButton()
+    RefreshAnvilUI(GetAnvilFrame())
+end
+
+local function ScheduleAnvilRefresh(frame)
+    if not frame or not C_Timer or not C_Timer.After then
+        RefreshAnvilUI(frame)
+        return
+    end
+    local delays = { 0, 0.05, 0.15, 0.35, 0.75, 1.5 }
+    for _, delay in ipairs(delays) do
+        C_Timer.After(delay, function()
+            if frame.IsShown and frame:IsShown() then
+                RefreshAnvilUI(frame)
+            end
+        end)
+    end
 end
 
 local function HookFrameShowHide(frame)
@@ -134,9 +181,7 @@ local function HookFrameShowHide(frame)
 
     local priorShow = frame:GetScript("OnShow")
     frame:SetScript("OnShow", function(self, ...)
-        EnsureAnvilButton()
-        LayoutAnvilButton(self)
-        RefreshAnvilApplyButton()
+        ScheduleAnvilRefresh(self)
         if priorShow then priorShow(self, ...) end
     end)
 
@@ -149,23 +194,18 @@ local function HookFrameShowHide(frame)
     end)
 end
 
-local function CreateActionStrip(frame)
-    if frame._ebonBuildsActionStrip then
-        actionStrip = frame._ebonBuildsActionStrip
+local function CreateApplyButton(frame)
+    if frame._ebonBuildsApplyBtn then
         applyBtn = frame._ebonBuildsApplyBtn
         return
     end
 
-    if frame._ebonBuildsApplyBtn then
-        frame._ebonBuildsApplyBtn:Hide()
-        frame._ebonBuildsApplyBtn = nil
+    if frame._ebonBuildsActionStrip then
+        frame._ebonBuildsActionStrip:Hide()
+        frame._ebonBuildsActionStrip = nil
     end
 
-    local strip = CreateFrame("Frame", nil, frame)
-    strip:SetFrameStrata(frame:GetFrameStrata() or "DIALOG")
-    strip:SetFrameLevel((frame:GetFrameLevel() or 100) + 40)
-
-    local btn = CreateFrame("Button", "EbonBuildsAnvilApplyBtn", strip, "UIPanelButtonTemplate")
+    local btn = CreateFrame("Button", "EbonBuildsAnvilApplyBtn", frame, "UIPanelButtonTemplate")
     btn:SetText("Apply from Build")
     btn:SetScript("OnClick", function()
         local build = EbonBuilds.Build.GetAffixSourceForCurrentClass()
@@ -186,9 +226,7 @@ local function CreateActionStrip(frame)
     end)
     btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    frame._ebonBuildsActionStrip = strip
     frame._ebonBuildsApplyBtn = btn
-    actionStrip = strip
     applyBtn = btn
 end
 
@@ -198,13 +236,28 @@ EnsureAnvilButton = function()
 
     RegisterBagDeferral(frame)
     ResetLegacyFrameHeight(frame)
-    CreateActionStrip(frame)
-    LayoutAnvilButton(frame)
+    CreateApplyButton(frame)
     HookFrameShowHide(frame)
+    LayoutAnvilButton(frame)
     applyBtn:Show()
-    actionStrip:Show()
     RefreshAnvilApplyButton()
     return true
+end
+
+local function StartRefreshPoll()
+    if refreshFrame then return end
+    refreshFrame = CreateFrame("Frame")
+    local elapsed = 0
+    refreshFrame:SetScript("OnUpdate", function(self, dt)
+        elapsed = elapsed + dt
+        if elapsed < 0.25 then return end
+        elapsed = 0
+
+        local frame = GetAnvilFrame()
+        if frame and frame:IsShown() then
+            RefreshAnvilUI(frame)
+        end
+    end)
 end
 
 local function HookExtractionToggle()
@@ -212,24 +265,13 @@ local function HookExtractionToggle()
     toggleHooked = true
     if hooksecurefunc then
         hooksecurefunc(ExtractionUI, "Toggle", function()
-            if C_Timer and C_Timer.After then
-                C_Timer.After(0.05, function()
-                    EnsureAnvilButton()
-                    local frame = GetAnvilFrame()
-                    if frame then LayoutAnvilButton(frame) end
-                    RefreshAnvilApplyButton()
-                end)
-            else
-                EnsureAnvilButton()
-                RefreshAnvilApplyButton()
-            end
+            ScheduleAnvilRefresh(GetAnvilFrame())
         end)
     else
         local origToggle = ExtractionUI.Toggle
         ExtractionUI.Toggle = function(...)
             origToggle(...)
-            EnsureAnvilButton()
-            RefreshAnvilApplyButton()
+            ScheduleAnvilRefresh(GetAnvilFrame())
         end
     end
 end
@@ -237,9 +279,7 @@ end
 local function OnAnvilMaybeOpened()
     local frame = GetAnvilFrame()
     if frame and frame:IsShown() then
-        EnsureAnvilButton()
-        LayoutAnvilButton(frame)
-        RefreshAnvilApplyButton()
+        ScheduleAnvilRefresh(frame)
     end
 end
 
@@ -269,14 +309,18 @@ end
 function EbonBuilds.AnvilIntegration.Init()
     RegisterEventHooks()
     HookExtractionToggle()
+    StartRefreshPoll()
     EnsureAnvilButton()
 
     local waiter = CreateFrame("Frame")
     local elapsed = 0
     waiter:SetScript("OnUpdate", function(self, dt)
         elapsed = elapsed + dt
-        if GetAnvilFrame() and EnsureAnvilButton() then
-            self:SetScript("OnUpdate", nil)
+        if GetAnvilFrame() then
+            EnsureAnvilButton()
+            if elapsed >= 1 then
+                self:SetScript("OnUpdate", nil)
+            end
             return
         end
         if elapsed >= 120 then
