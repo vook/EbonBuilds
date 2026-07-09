@@ -28,6 +28,7 @@ local hooksInstalled    = false
 local freezeRoundActive       = false
 local locallyFrozenIndices    = {}
 local seenEchoFamilies        = {}
+local echoOffersThisRun       = 0
 
 local SHOW_DEBOUNCE     = 0.5
 local lastShowChoices   = nil
@@ -222,10 +223,11 @@ local function OnEchoOfferShown(choices)
     if suppressAutoHook then return end
     if not choices or #choices == 0 then return end
     local build = EbonBuilds.Build.GetActive()
-    if build and EbonBuilds.Build.RecordEchoOffer then
-        local sig = ChoiceSignature(choices)
-        if sig and sig ~= lastStatsOfferSig then
-            lastStatsOfferSig = sig
+    local sig = ChoiceSignature(choices)
+    if sig and sig ~= lastStatsOfferSig then
+        lastStatsOfferSig = sig
+        echoOffersThisRun = echoOffersThisRun + 1
+        if build and EbonBuilds.Build.RecordEchoOffer then
             EbonBuilds.Build.RecordEchoOffer(build, choices)
         end
     end
@@ -339,6 +341,12 @@ function EbonBuilds.Automation.ResetPeakCache()
     if EbonBuilds.Scoring and EbonBuilds.Scoring.ResetCache then
         EbonBuilds.Scoring.ResetCache()
     end
+end
+
+function EbonBuilds.Automation.ResetRunState()
+    echoOffersThisRun = 0
+    lastStatsOfferSig = nil
+    EbonBuilds.Automation.ResetPeakCache()
 end
 
 local function MarkEchoFamilySeen(spellId, displayName, grantedKey)
@@ -885,7 +893,8 @@ function EbonBuilds.Automation.Evaluate()
     pendingWaitCount = 0
 
     local rerollsLeft = GetAvailableRerolls(runData)
-    if not InAutoFreezeRound() and rerollsLeft > 0 then
+    local skipFirstOfferReroll = echoOffersThisRun <= 1
+    if not skipFirstOfferReroll and not InAutoFreezeRound() and rerollsLeft > 0 then
         -- Reroll guard: skip if any single echo is above the guard threshold,
         -- regardless of the sum. Prevents rerolling when one good echo is
         -- offered alongside weak ones.
@@ -993,90 +1002,9 @@ function EbonBuilds.Automation.Init()
         end)
     end
 
-    if ProjectEbonhold.onEventReceived and ProjectEbonhold.SS then
-        local ss = ProjectEbonhold.SS
-
-        if ss.SEND_PLAYER_PERK_CHOICE then
-            ProjectEbonhold.onEventReceived(ss.SEND_PLAYER_PERK_CHOICE, function(body)
-                if not body or body == "" then
-                    ResetAutomationRound({ clearDebounce = true })
-                else
-                    ResetAutomationRound({ clearDebounce = true })
-                end
-            end)
-        end
-
-        if ss.SEND_BANISH_REPLACEMENT_PERK then
-            ProjectEbonhold.onEventReceived(ss.SEND_BANISH_REPLACEMENT_PERK, function(body)
-                if not EbonBuilds.Automation.IsEnabled() then return end
-                if not body or body == "" or body == "0" then return end
-                if not ProjectEbonhold.PerkService.GetCurrentChoice() then return end
-                pendingWaitCount = 0
-                local current = ProjectEbonhold.PerkService.GetCurrentChoice()
-                if current then
-                    ScheduleAutomation(current, { bypassDebounce = true, keepPending = true })
-                end
-            end)
-        end
-
-        if ss.SEND_FREEZE_PERK_RESULT then
-            ProjectEbonhold.onEventReceived(ss.SEND_FREEZE_PERK_RESULT, function(body)
-                if not EbonBuilds.Automation.IsEnabled() then return end
-                if not ProjectEbonhold.PerkService.GetCurrentChoice() then return end
-
-                local inAutoFreezeRound = next(locallyFrozenIndices) ~= nil
-                if body == "1" then
-                    local current = ProjectEbonhold.PerkService.GetCurrentChoice()
-                    if current then
-                        for i, choice in ipairs(current) do
-                            if choice.justFrozen or locallyFrozenIndices[i] then
-                                choice.isFrozen = true
-                            end
-                        end
-                    end
-                    if inAutoFreezeRound then
-                        freezeRoundActive = true
-                    end
-                    pendingWaitCount = 0
-                    if inAutoFreezeRound and not HasPendingPerkAction(false) then
-                        local result = RunEvaluate()
-                        if result == true or result == "wait" then
-                            return
-                        end
-                        UnblockPerkInteraction()
-                        return
-                    end
-                else
-                    ResetAutomationRound()
-                end
-                pendingWaitCount = 0
-                local current = ProjectEbonhold.PerkService.GetCurrentChoice()
-                if current then
-                    ScheduleAutomation(current, {
-                        keepFreezeRound = (body == "1" and inAutoFreezeRound),
-                        keepPending = true,
-                    })
-                end
-            end)
-        end
-
-        if ss.SEND_PLAYER_PERK_SELECTION_RESULT then
-            ProjectEbonhold.onEventReceived(ss.SEND_PLAYER_PERK_SELECTION_RESULT, function(body)
-                if body >= "1" then
-                    ResetAutomationRound({ clearDebounce = true })
-                    return
-                end
-                if body ~= "0" then return end
-                if not EbonBuilds.Automation.IsEnabled() then return end
-                if not ProjectEbonhold.PerkService.GetCurrentChoice() then return end
-                pendingWaitCount = 0
-                if RunEvaluate() == true then
-                    return
-                end
-                UnblockPerkInteraction()
-            end)
-        end
-    end
+    -- IMPORTANT: Do not register onEventReceived handlers for perk events here.
+    -- ProjectEbonhold stores one handler per event id; overriding these breaks
+    -- native echo UI state/interaction. Automation relies on PerkUI hooks instead.
 
     hooksInstalled = true
     return true
@@ -1096,16 +1024,7 @@ hookRetryFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 hookRetryFrame:RegisterEvent("PLAYER_LEVEL_UP")
 hookRetryFrame:SetScript("OnEvent", function(_, event, ...)
     if event == "PLAYER_LEVEL_UP" then
-        local newLevel = ...
         ResetAutomationRound({ clearDebounce = true })
-        if newLevel and newLevel > 1 and not UnitIsDeadOrGhost("player")
-            and EbonBuilds.Automation.IsEnabled() then
-            C_Timer.After(0, function()
-                if not UnitIsDeadOrGhost("player") then
-                    EbonBuilds.Automation.GetPeak()
-                end
-            end)
-        end
         return
     end
     EbonBuilds.Automation.EnsureHooked()

@@ -48,19 +48,25 @@ When echoes are offered during a run, the automation engine evaluates every choi
 
 A toast notification appears after each automated action showing the three offered echoes, the target highlighted, and your remaining charges.
 
+> **Stability note:** EbonBuilds does not register native perk server event handlers via `onEventReceived` for echo choice flow. ProjectEbonhold keeps one handler per event id, so overriding those handlers can break native `/echoes` UI state and manual pick interactions.
+
 ---
 
 ## Build List & Overview
 
 The **left panel** lists all your builds â€” created or imported. Click any build to load it; the active build is the one driving automation. You can toggle automation on or off per build directly from the overview.
 
-Clicking a build opens the **Overview** tab with class, spec, author, last modified, locked echoes, and the automation toggle. Four additional sub-tabs are available:
+Clicking a build opens the **Overview** tab with class, spec, author, last modified, locked echoes, and the automation toggle. Five additional sub-tabs are available:
+
+Locked echoes support up to **6 slots**. EbonBuilds detects available slots from ProjectEbonhold runtime data when possible and keeps a safe 6-slot fallback for unlocked clients.
 
 **Stats** â€” echoes seen, runs completed, picks, rerolls/banishes/freezes used, quality distribution, and the most picked and banned echoes. 
 
 **Collection** â€” echoes relevant to your build with drop source, rolled status, tome ownership, base weight, and score. Filter by tome requirement, multi-rank echoes, and class visibility.
 
 **Policies** â€” echoes with non-default automation policies for quick review and editing.
+
+**Affixes** â€” scanned affix sources for the build with apply preview and scan controls.
 
 **Logbook** â€” the full session history embedded in the overview. A session starts at level 1 and ends when your character dies and resets. Every automation action is recorded with echo names, scores, target highlights, and remaining charges. You can export, delete individual entries, or clear all logs.
 
@@ -110,6 +116,7 @@ When you edit a build you imported from another player, the build becomes yours:
 | `activeBuildId` | Currently active build driving automation |
 | `sessions` | Session history logs |
 | `pendingWeights` | Staging area for echo weights during editing |
+| `pendingScannedAffixes` | Staging area for affix scans during editing |
 | `_isEditingBuild` | Flag indicating edit/create mode is active |
 | `remoteBuilds` | Builds received via sync, not yet imported â€” keyed by source ObjectId |
 | `lastSyncDate` | ISO timestamp of last successful sync |

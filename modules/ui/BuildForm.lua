@@ -39,13 +39,23 @@ local state = {
     class    = nil,
     spec     = 1,
     comments = "",
-    locked = { nil, nil, nil, nil, nil },
+    locked = EbonBuilds.Build and EbonBuilds.Build.NormalizeLockedEchoes
+        and EbonBuilds.Build.NormalizeLockedEchoes()
+        or { nil, nil, nil, nil, nil, nil },
     settings  = nil,
     isPublic  = false,
 }
 function EbonBuilds.BuildForm.GetEditingClass()
     return state.class
 end
+
+function EbonBuilds.BuildForm.GetEditingBuild()
+    if state.mode == "edit" and state.id then
+        return EbonBuilds.Build.Get(state.id)
+    end
+    return nil
+end
+
 function EbonBuilds.BuildForm.GetEditingSettings()
     if not state.settings then
         state.settings = EbonBuilds.Build.DefaultSettings()
@@ -222,7 +232,8 @@ local function BuildLockedSlots(parent, x, y)
     local lbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     lbl:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
     lbl:SetText("Locked Echoes:")
-    for i = 1, 5 do
+    local maxSlots = (EbonBuilds.Build and EbonBuilds.Build.MAX_LOCKED_SLOTS) or 6
+    for i = 1, maxSlots do
         local btn = CreateIconButton(parent, 36)
         btn:SetPoint("TOPLEFT", parent, "TOPLEFT", x + 140 + (i - 1) * 44, y + 6)
         btn._icon:SetTexture("Interface\\Buttons\\UI-EmptySlot")
@@ -423,21 +434,26 @@ local function OnSave()
             settings = state.settings,
             isPublic = state.isPublic,
             echoWeights = weights,
+            scannedAffixes = EbonBuildsDB.pendingScannedAffixes,
         })
         state.mode = "edit"
         state.id   = b.id
         EbonBuilds.Build.SetActive(b.id)
     else
+        local build = EbonBuilds.Build.Get(state.id)
         EbonBuilds.Build.Save(state.id, {
             title = state.title, class = state.class, spec = state.spec,
             comments = state.comments, lockedEchoes = { unpack(state.locked) },
             settings = state.settings,
             isPublic = state.isPublic,
             echoWeights = weights,
+            scannedAffixes = EbonBuildsDB.pendingScannedAffixes
+                or (build and build.scannedAffixes),
         })
     end
     EbonBuildsDB._isEditingBuild = nil
     EbonBuildsDB.pendingWeights = nil
+    EbonBuildsDB.pendingScannedAffixes = nil
     EbonBuildsDB._wizardPrefill = nil
     if EbonBuilds.BuildList and EbonBuilds.BuildList.Refresh then
         EbonBuilds.BuildList.Refresh()
@@ -504,15 +520,22 @@ EbonBuilds.BuildForm.Delete = OnDelete
 ------------------------------------------------------------------------
 
 ApplyStateToInputs = function()
+    local slotCount = (EbonBuilds.Build and EbonBuilds.Build.GetLockedSlotCount and EbonBuilds.Build.GetLockedSlotCount()) or 5
     titleBox:SetText(state.title or "")
     commentsBox:SetText(state.comments or "")
     RefreshDescriptionPlaceholder()
     RefreshClassSelection()
     RefreshSpecButtons()
     publicToggle:SetText(state.isPublic and "Public" or "Make Public")
-    for i = 1, 5 do
+    for i = 1, #slotButtons do
         local id = state.locked[i]
         local btn = slotButtons[i]
+        if i > slotCount then
+            btn:Hide()
+            btn.spellId = nil
+        else
+            btn:Show()
+        end
         btn.spellId = id
         if id then
             btn._icon:SetTexture(select(3, GetSpellInfo(id)))
@@ -544,6 +567,19 @@ local function CloneSettings(src)
     return dst
 end
 
+local function CloneScannedAffixStore(store)
+    if not store then return nil end
+    local out = { activeSource = store.activeSource, scans = {} }
+    for source, scan in pairs(store.scans or {}) do
+        out.scans[source] = {
+            source    = scan.source or source,
+            scannedAt = scan.scannedAt,
+            names     = EbonBuilds.Build.CoerceAffixNameList(scan.names),
+        }
+    end
+    return out
+end
+
 LoadFromBuild = function(build)
     state.mode     = "edit"
     state.id       = build.id
@@ -553,9 +589,18 @@ LoadFromBuild = function(build)
     state.comments = build.comments or ""
     state.settings = CloneSettings(build.settings)
     state.isPublic = build.isPublic or false
-    for i = 1, 5 do state.locked[i] = build.lockedEchoes and build.lockedEchoes[i] or nil end
+    state.locked = (EbonBuilds.Build and EbonBuilds.Build.NormalizeLockedEchoes)
+        and EbonBuilds.Build.NormalizeLockedEchoes(build.lockedEchoes)
+        or (build.lockedEchoes or {})
     EbonBuildsDB._isEditingBuild = true
     EbonBuildsDB.pendingWeights = {}
+    EbonBuildsDB.pendingScannedAffixes = nil
+    if build.scannedAffixes then
+        local store = EbonBuilds.Build.NormalizeScannedAffixes(build.scannedAffixes)
+        if store then
+            EbonBuildsDB.pendingScannedAffixes = CloneScannedAffixStore(store)
+        end
+    end
     if build.echoWeights then
         for name, weight in pairs(build.echoWeights) do
             EbonBuildsDB.pendingWeights[name] = weight
@@ -572,9 +617,12 @@ local function LoadDefaults()
     state.comments = ""
     state.settings = EbonBuilds.Build.DefaultSettings()
     state.isPublic = false
-    for i = 1, 5 do state.locked[i] = nil end
+    state.locked = (EbonBuilds.Build and EbonBuilds.Build.NormalizeLockedEchoes)
+        and EbonBuilds.Build.NormalizeLockedEchoes()
+        or { nil, nil, nil, nil, nil, nil }
     EbonBuildsDB._isEditingBuild = true
     EbonBuildsDB.pendingWeights = {}
+    EbonBuildsDB.pendingScannedAffixes = nil
     EbonBuildsDB._wizardPrefill = nil
 end
 
@@ -588,7 +636,9 @@ local function LoadFromWizardPrefill()
     state.comments = pre.comments or ""
     state.settings = pre.settings or EbonBuilds.Build.DefaultSettings()
     state.isPublic = pre.isPublic or false
-    for i = 1, 5 do state.locked[i] = (pre.lockedEchoes and pre.lockedEchoes[i]) or nil end
+    state.locked = (EbonBuilds.Build and EbonBuilds.Build.NormalizeLockedEchoes)
+        and EbonBuilds.Build.NormalizeLockedEchoes(pre.lockedEchoes)
+        or (pre.lockedEchoes or {})
     EbonBuildsDB._isEditingBuild = true
     EbonBuildsDB.pendingWeights = EbonBuildsDB.pendingWeights or {}
 end

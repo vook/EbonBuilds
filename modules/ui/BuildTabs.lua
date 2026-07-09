@@ -1,15 +1,15 @@
 -- EbonBuilds: modules/ui/BuildTabs.lua
 -- Responsibility: tabbed container for a single build (Overview + Echoes +
--- Bonus + Automation). Registered as the "buildTabs" view. Delegates
--- content to BuildForm, WeightsView, BonusView and SettingsView via
--- their Mount/Unmount API.
+-- Bonus + Automation). Registered as the "buildTabs" view. Affixes are
+-- managed from the build overview dashboard, not here.
 
 EbonBuilds.BuildTabs = {}
 
 local viewFrame
 local contentArea
 local tab1, tab2, tab3, tab4
-local saveBtn, cancelBtn
+local saveBtn, cancelBtn, exportBtn, exportListBtn
+local activeTab = 1
 local state = { context = nil }
 
 ------------------------------------------------------------------------
@@ -17,7 +17,17 @@ local state = { context = nil }
 ------------------------------------------------------------------------
 
 local function RefreshButtons()
-    -- cancel is always visible in both modes
+    if exportListBtn and exportBtn then
+        if activeTab == 2 then
+            exportListBtn:Show()
+            exportBtn:ClearAllPoints()
+            exportBtn:SetPoint("BOTTOMLEFT", viewFrame, "BOTTOMLEFT", 105, 8)
+        else
+            exportListBtn:Hide()
+            exportBtn:ClearAllPoints()
+            exportBtn:SetPoint("BOTTOMLEFT", viewFrame, "BOTTOMLEFT", 10, 8)
+        end
+    end
 end
 
 function EbonBuilds.BuildTabs.OnBuildSaved()
@@ -25,36 +35,44 @@ function EbonBuilds.BuildTabs.OnBuildSaved()
     RefreshButtons()
 end
 
-local function ShowOverview()
-    PanelTemplates_SetTab(viewFrame, 1)
+local function UnmountAllTabs()
+    EbonBuilds.BuildForm.Unmount()
     EbonBuilds.WeightsView.Unmount()
     EbonBuilds.BonusView.Unmount()
     EbonBuilds.SettingsView.Unmount()
+    EbonBuilds.AffixView.Unmount()
+end
+
+local function ShowOverview()
+    activeTab = 1
+    PanelTemplates_SetTab(viewFrame, 1)
+    UnmountAllTabs()
     EbonBuilds.BuildForm.Mount(contentArea, state.context)
+    RefreshButtons()
 end
 
 local function ShowEchoes()
+    activeTab = 2
     PanelTemplates_SetTab(viewFrame, 2)
-    EbonBuilds.BuildForm.Unmount()
-    EbonBuilds.BonusView.Unmount()
-    EbonBuilds.SettingsView.Unmount()
+    UnmountAllTabs()
     EbonBuilds.WeightsView.Mount(contentArea)
+    RefreshButtons()
 end
 
 local function ShowBonus()
+    activeTab = 3
     PanelTemplates_SetTab(viewFrame, 3)
-    EbonBuilds.BuildForm.Unmount()
-    EbonBuilds.WeightsView.Unmount()
-    EbonBuilds.SettingsView.Unmount()
+    UnmountAllTabs()
     EbonBuilds.BonusView.Mount(contentArea)
+    RefreshButtons()
 end
 
 local function ShowAutomation()
+    activeTab = 4
     PanelTemplates_SetTab(viewFrame, 4)
-    EbonBuilds.BuildForm.Unmount()
-    EbonBuilds.WeightsView.Unmount()
-    EbonBuilds.BonusView.Unmount()
+    UnmountAllTabs()
     EbonBuilds.SettingsView.Mount(contentArea)
+    RefreshButtons()
 end
 
 ------------------------------------------------------------------------
@@ -131,7 +149,19 @@ local function BuildViewFrame()
     cancelBtn:SetText("Cancel")
     cancelBtn:SetScript("OnClick", function() EbonBuilds.BuildForm.Cancel() end)
 
-    local exportBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    exportListBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    exportListBtn:SetSize(90, 22)
+    exportListBtn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 8)
+    exportListBtn:SetText("Export List")
+    exportListBtn:Hide()
+    exportListBtn:SetScript("OnClick", function()
+        local build = EbonBuilds.Build.GetActive()
+        if build and EbonBuilds.Weights.ShowExportListDialog then
+            EbonBuilds.Weights.ShowExportListDialog(build)
+        end
+    end)
+
+    exportBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
     exportBtn:SetSize(90, 22)
     exportBtn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 8)
     exportBtn:SetText("Export")
@@ -171,21 +201,19 @@ function view.Show(container, context)
     PanelTemplates_EnableTab(viewFrame, 3)
     PanelTemplates_EnableTab(viewFrame, 4)
 
-    EbonBuilds.WeightsView.Unmount()
-    EbonBuilds.BonusView.Unmount()
-    EbonBuilds.SettingsView.Unmount()
+    UnmountAllTabs()
     EbonBuilds.BuildForm.Mount(contentArea, state.context)
+    activeTab = 1
+    RefreshButtons()
     viewFrame:Show()
 end
 
 function view.Hide()
     EbonBuildsDB._isEditingBuild = nil
     EbonBuildsDB.pendingWeights = nil
+    EbonBuildsDB.pendingScannedAffixes = nil
     EbonBuildsDB._wizardPrefill = nil
-    EbonBuilds.BuildForm.Unmount()
-    EbonBuilds.WeightsView.Unmount()
-    EbonBuilds.BonusView.Unmount()
-    EbonBuilds.SettingsView.Unmount()
+    UnmountAllTabs()
     if viewFrame then viewFrame:Hide() end
 end
 

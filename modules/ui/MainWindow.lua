@@ -4,7 +4,7 @@
 
 EbonBuilds.MainWindow = {}
 
-local WINDOW_WIDTH  = 800
+local WINDOW_WIDTH  = 900
 local WINDOW_HEIGHT = 550
 local LEFT_WIDTH    = 200
 local FRAME_NAME    = "EbonBuildsMainWindow"
@@ -239,6 +239,10 @@ local function BuildFrame()
     frame._settingsPopup = settingsPopup
 
     frame:Hide()
+    if type(UISpecialFrames) == "table" then
+        table.insert(UISpecialFrames, FRAME_NAME)
+        table.insert(UISpecialFrames, "EbonBuildsGlobalSettingsPopup")
+    end
     return frame
 end
 
@@ -309,4 +313,9 @@ end
 
 function EbonBuilds.MainWindow.GetRightPanel()
     return EbonBuilds.MainWindow._right
+end
+
+function EbonBuilds.MainWindow.IsVisible()
+    local frame = EbonBuilds.MainWindow._frame
+    return frame and frame:IsVisible()
 end
