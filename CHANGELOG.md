@@ -21,7 +21,7 @@ All notable changes to EbonBuilds are documented in this file.
 - Per-echo automation policies: Normal, Ban 1st seen, Ban after pick, Ignore after pick, Never pick.
 - Policy dropdown in the echoes editor; legacy `noveltyBanishList` migrates automatically.
 - Automation scoring and selection honor policy flags.
-- Auto-reroll uses best pickable echo score (not sum of all offers); **Reroll guard %** restored to block rerolls when any single offer scores above the guard.
+- Auto-reroll triggers when the sum of all offered echo scores falls below the auto-reroll threshold; **Reroll guard %** blocks rerolls when any single offer scores above the guard.
 
 ### Policies overview tab
 - Dedicated **Policies** tab lists echoes with non-default policies for quick review and edits.

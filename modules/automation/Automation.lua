@@ -701,12 +701,6 @@ local function FreezeRoundSelectReady(scored, threshold)
     return FindNextFreezeTarget(scored, threshold) == nil
 end
 
-local function FindBankFreezeTarget(scored, threshold)
-    local above = CollectAboveThreshold(scored, threshold)
-    if #above == 0 then return nil end
-    return above[1]
-end
-
 local function ApplyLocalFreezePenalties(scored, settings)
     local penalty = (settings.freezePenaltyPct or 0) / 100
     if penalty <= 0 then return end
@@ -785,37 +779,12 @@ local function HasActionableBanishTarget(scored, settings, banList, peakScore, r
     return FindBanishTarget(scored, settings, banList, peakScore) ~= nil
 end
 
-local function IsBanishableEcho(s, settings, banList, peakScore, canBanish)
-    if not canBanish or s.isFrozen or s.isCarried or s.isProtected then
-        return false
-    end
-    local threshold = ThresholdScore(peakScore, settings.autoBanishPct)
-    return banList[s.spellId] or s.banByPolicy or s.score < threshold
-end
-
-local function BestRemainingScore(scored, settings, banList, peakScore, runData, choices)
-    local canBanish = GetAvailableBanishes(runData) > 0
-    local best = nil
+local function OfferedScoreSum(scored)
+    local sum = 0
     for _, s in ipairs(scored) do
-        if not IsEchoFrozenForPick(s, choices)
-            and not banList[s.spellId] and not s.banByPolicy
-            and not IsBanishableEcho(s, settings, banList, peakScore, canBanish) then
-            if not best or s.score > best then
-                best = s.score
-            end
-        end
+        sum = sum + s.score
     end
-    if not best then
-        for _, s in ipairs(scored) do
-            if not IsEchoFrozenForPick(s, choices)
-                and not IsBanishableEcho(s, settings, banList, peakScore, canBanish) then
-                if not best or s.score > best then
-                    best = s.score
-                end
-            end
-        end
-    end
-    return best or 0
+    return sum
 end
 
 local function AnnotateScored(scored, banList, whitelist, lockedList)
@@ -916,27 +885,13 @@ function EbonBuilds.Automation.Evaluate()
     pendingWaitCount = 0
 
     local rerollsLeft = GetAvailableRerolls(runData)
-    if not InAutoFreezeRound() and rerollsLeft > 0
-        and not HasActionableBanishTarget(scored, settings, banList, peakScore, runData) then
+    if not InAutoFreezeRound() and rerollsLeft > 0 then
+        -- Reroll guard: skip if any single echo is above the guard threshold,
+        -- regardless of the sum. Prevents rerolling when one good echo is
+        -- offered alongside weak ones.
         if not IsBlockedByRerollGuard(scored, peakScore, settings) then
-            local best = BestRemainingScore(scored, settings, banList, peakScore, runData, choices)
-            if best < ThresholdScore(peakScore, settings.autoRerollPct) then
-                if GetAvailableFreezes(runData) > 0 then
-                    local bank = FindBankFreezeTarget(scored, threshold)
-                    if bank then
-                        local okFreeze = ProjectEbonhold.PerkService.FreezePerk(bank.index - 1)
-                        if okFreeze then
-                            UpdateStat(build, "freezesUsed")
-                            locallyFrozenIndices[bank.index] = true
-                            if runData and runData.usedFreezes ~= nil then
-                                runData.usedFreezes = runData.usedFreezes + 1
-                            end
-                            LogAndToast(scored, "Freeze", bank.index, choices, settings)
-                            ScheduleAutomation(choices, { keepFreezeRound = false, keepPending = true })
-                            return true
-                        end
-                    end
-                end
+            local sum = OfferedScoreSum(scored)
+            if sum < ThresholdScore(peakScore, settings.autoRerollPct) then
                 local ok = ProjectEbonhold.PerkService.RequestReroll()
                 if ok then
                     MarkRerolledFamiliesSeen(scored)
@@ -1163,9 +1118,8 @@ EbonBuilds.Automation._IsProtected     = IsProtected
 EbonBuilds.Automation._CollectAboveThreshold = CollectAboveThreshold
 EbonBuilds.Automation._FindBanishTarget     = FindBanishTarget
 EbonBuilds.Automation._HasActionableBanishTarget = HasActionableBanishTarget
-EbonBuilds.Automation._BestRemainingScore    = BestRemainingScore
+EbonBuilds.Automation._OfferedScoreSum           = OfferedScoreSum
 EbonBuilds.Automation._IsBlockedByRerollGuard  = IsBlockedByRerollGuard
-EbonBuilds.Automation._FindBankFreezeTarget  = FindBankFreezeTarget
 EbonBuilds.Automation._FindNextFreezeTarget   = FindNextFreezeTarget
 EbonBuilds.Automation._FindFreezeRoundKeeper  = FindFreezeRoundKeeper
 EbonBuilds.Automation._TrySelectFreezeRoundKeeper = TrySelectFreezeRoundKeeper
