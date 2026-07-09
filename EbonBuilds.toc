@@ -15,7 +15,9 @@ modules/ui/BuildList.lua
 modules/ui/EchoPicker.lua
 modules/ui/BuildWizard.lua
 modules/ui/BuildForm.lua
+modules/ui/ScrollWheel.lua
 modules/ui/Filters.lua
+modules/ui/EchoTableColumns.lua
 modules/ui/EchoTableRows.lua
 modules/ui/EchoTable.lua
 modules/session/Session.lua

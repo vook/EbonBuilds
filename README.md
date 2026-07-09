@@ -18,7 +18,7 @@ Click **+ New Build** in the left panel to open the editor. The editor is split 
 
 **Overview** â€” Set your **class**, **specialization**, **locked echoes**, and **description**. Locked echoes are the ones you want to lock in your inventory during a run; they have the highest selection priority in the automation pipeline. The description field is your space to document what the build needs: recommended items, affixes, rotation priorities, glyphs â€” anything another player would need to know.
 
-**Echoes** â€” Fine-tune your build echo by echo. Assign a weight to each echo and see its calculated score across all five quality tiers (Common through Legendary). The higher the weight, the more the automation engine favors that echo.
+**Echoes** â€” Fine-tune your build echo by echo. Assign a base weight and optional per-quality overrides for each echo; expand multi-rank echoes to edit each tier separately. A **tome** column shows whether you have learned the echo on your account. A **policy** dropdown controls how automation treats each echo (ban on first sight, never pick, and more). See calculated scores across all five quality tiers (Common through Legendary). The higher the weight, the more the automation engine favors that echo.
 
 **Bonus** â€” Apply batch scoring modifiers based on echo characteristics like quality tier and family. These bonuses layer on top of individual weights. Each modifier has two modes: **additive** (the default) adds the bonus value directly to the echo's base score â€” an echo with 100 score and a +20 rarity bonus becomes 120. **Multiplicative** multiplies the base weight by the bonus: an echo with 100 base weight and a 0.2 multiplier gets 100 + 20 = 120. When the base weight is zero, multiplicative bonuses contribute nothing since only the base is multiplied; additive bonuses from other sources are ignored in the multiplication. There is also a **novelty** bonus, designed specifically for the Adaptive Power echo, which rewards unique echoes. If an echo is not already on your picked list, the novelty value is added to its total score â€” so an echo with 100 base score and 50 novelty will show 150 the first time it appears.
 
@@ -114,4 +114,3 @@ When you edit a build you imported from another player, the build becomes yours:
 | `syncPeers` | Known responder names for fallback discovery |
 | `syncVersion` | Tracks the last `SYNC_VERSION` â€” bumping it purges `remoteBuilds` |
 | `minimapAngle` | Minimap button position |
-

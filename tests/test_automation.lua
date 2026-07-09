@@ -202,3 +202,40 @@ function TestAnnotate.testLockedEchoFlag()
     assertFalse(scored[1].isLocked)
     assertTrue(scored[2].isLocked, "Brutal (200200) should be flagged as locked")
 end
+
+------------------------------------------------------------------------
+-- OfferedScoreSum: reroll uses sum of all offers (original behavior)
+------------------------------------------------------------------------
+
+TestRerollScore = {}
+
+function TestRerollScore.testOfferedScoreSumAddsAllOffers()
+    local scored = {
+        { index = 1, spellId = 1, name = "Weak A", score = 10 },
+        { index = 2, spellId = 2, name = "Weak B", score = 12 },
+        { index = 3, spellId = 3, name = "Strong", score = 95 },
+    }
+    assertEquals(EbonBuilds.Automation._OfferedScoreSum(scored), 117)
+end
+
+function TestRerollScore.testRerollGuardBlocksWhenAnyEchoAboveThreshold()
+    local settings = EbonBuilds.Build.DefaultSettings()
+    settings.rerollGuardPct = 90
+    local scored = {
+        { index = 1, spellId = 1, name = "Weak A", score = 10 },
+        { index = 2, spellId = 2, name = "Weak B", score = 12 },
+        { index = 3, spellId = 3, name = "Guarded", score = 91 },
+    }
+    assertTrue(EbonBuilds.Automation._IsBlockedByRerollGuard(scored, 100, settings))
+end
+
+function TestRerollScore.testRerollGuardAllowsWhenAllBelowThreshold()
+    local settings = EbonBuilds.Build.DefaultSettings()
+    settings.rerollGuardPct = 90
+    local scored = {
+        { index = 1, spellId = 1, name = "Weak A", score = 10 },
+        { index = 2, spellId = 2, name = "Weak B", score = 12 },
+        { index = 3, spellId = 3, name = "Also weak", score = 30 },
+    }
+    assertFalse(EbonBuilds.Automation._IsBlockedByRerollGuard(scored, 100, settings))
+end

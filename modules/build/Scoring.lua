@@ -63,11 +63,145 @@ function EbonBuilds.Scoring.ScorePerQuality(entry, weight, settings, quality)
     return s
 end
 
+-- Weight after quality and family bonuses (Bonus tab); excludes novelty.
+function EbonBuilds.Scoring.EffectiveWeight(entry, weight, settings, quality)
+    return EbonBuilds.Scoring.ScorePerQuality(entry, weight, settings, quality)
+end
+
 function EbonBuilds.Scoring.Score(entry, weight, settings)
     local s = EbonBuilds.Scoring.ScorePerQuality(entry, weight, settings, entry.quality)
     local base = weight or 0
     s = ApplyModifier(s, base, settings.noveltyValue or 0, settings.noveltyMode)
     return s
+end
+
+local WEIGHT_PREFIXES = {
+    "tome of ", "codex of ", "scroll of ", "manual of ",
+    "grimoire of ", "libram of ", "tablet of ",
+}
+
+local function NormalizeWeightKey(name)
+    if not name then return nil end
+    local n = string.lower(name)
+    for _, prefix in ipairs(WEIGHT_PREFIXES) do
+        if n:sub(1, #prefix) == prefix then
+            n = n:sub(#prefix + 1)
+            break
+        end
+    end
+    for _, suffix in ipairs({
+        " - common", " - uncommon", " - rare", " - epic", " - legendary",
+    }) do
+        if n:sub(-#suffix) == suffix then
+            n = n:sub(1, -(#suffix + 1))
+            break
+        end
+    end
+    return n
+end
+
+local function LookupWeight(weights, displayName, quality)
+    if not weights or not displayName then return 0 end
+    if quality ~= nil and EbonBuilds.Weights and EbonBuilds.Weights.QUALITY_SEP then
+        local qkey = displayName .. EbonBuilds.Weights.QUALITY_SEP .. tostring(quality)
+        if weights[qkey] ~= nil then return weights[qkey] end
+    end
+    if weights[displayName] then return weights[displayName] end
+    local norm = NormalizeWeightKey(displayName)
+    if not norm then return 0 end
+    for key, w in pairs(weights) do
+        if EbonBuilds.Weights and EbonBuilds.Weights.IsQKey and not EbonBuilds.Weights.IsQKey(key) then
+            if NormalizeWeightKey(key) == norm then return w end
+        elseif not (EbonBuilds.Weights and EbonBuilds.Weights.IsQKey) then
+            if NormalizeWeightKey(key) == norm then return w end
+        end
+    end
+    return 0
+end
+
+function EbonBuilds.Scoring.LookupWeight(weights, displayName, quality)
+    return LookupWeight(weights, displayName, quality)
+end
+
+local QUALITY_SUFFIX_NAMES = { "common", "uncommon", "rare", "epic", "legendary" }
+
+local function StripQualitySuffix(name)
+    if not name then return name end
+    local base, suffix = name:match("^(.+) %- (.+)$")
+    if base and suffix then
+        local lower = string.lower(suffix)
+        for _, q in ipairs(QUALITY_SUFFIX_NAMES) do
+            if lower == q then return base end
+        end
+    end
+    return name
+end
+
+local function ResolveEchoDisplayName(spellId, fallbackName)
+    local data = ProjectEbonhold.PerkDatabase and ProjectEbonhold.PerkDatabase[spellId]
+    if data and data.comment and data.comment ~= "" then
+        return StripQualitySuffix(data.comment)
+    end
+    if fallbackName and not fallbackName:match("^__id:") then
+        return StripQualitySuffix(fallbackName)
+    end
+    local spellName = GetSpellInfo(spellId)
+    if spellName then return StripQualitySuffix(spellName) end
+    return fallbackName
+end
+
+function EbonBuilds.Scoring.ResolveEchoDisplayName(spellId, fallbackName)
+    return ResolveEchoDisplayName(spellId, fallbackName)
+end
+
+function EbonBuilds.Scoring.GetEchoFamilyKey(spellId, displayName)
+    if spellId and ProjectEbonhold and ProjectEbonhold.PerkDatabase then
+        local data = ProjectEbonhold.PerkDatabase[spellId]
+        if data and data.groupId then
+            return "g:" .. tostring(data.groupId)
+        end
+    end
+    local name = ResolveEchoDisplayName(spellId, displayName)
+    if name then return "n:" .. string.lower(name) end
+    return nil
+end
+
+function EbonBuilds.Scoring.GetHighestPickedQuality(displayName, spellId, granted)
+    local targetKey = displayName and string.lower(displayName)
+    local targetGroupId
+    if spellId and ProjectEbonhold and ProjectEbonhold.PerkDatabase then
+        local data = ProjectEbonhold.PerkDatabase[spellId]
+        targetGroupId = data and data.groupId
+    end
+    local best
+    for key, instances in pairs(granted or {}) do
+        if type(instances) == "table" then
+            for _, inst in ipairs(instances) do
+                local sid = inst and inst.spellId
+                if sid then
+                    local instName = ResolveEchoDisplayName(sid, key)
+                    local sameEcho = targetKey and instName and string.lower(instName) == targetKey
+                    local sameGroup = false
+                    if targetGroupId and ProjectEbonhold.PerkDatabase then
+                        local instData = ProjectEbonhold.PerkDatabase[sid]
+                        sameGroup = instData and instData.groupId == targetGroupId
+                    end
+                    if sameEcho or sameGroup then
+                        local q = inst.quality
+                        if q == nil and ProjectEbonhold.PerkDatabase then
+                            q = ProjectEbonhold.PerkDatabase[sid] and ProjectEbonhold.PerkDatabase[sid].quality or 0
+                        end
+                        if q and (not best or q > best) then best = q end
+                    end
+                end
+            end
+        end
+    end
+    return best
+end
+
+function EbonBuilds.Scoring.IsEchoNovel(displayName, spellId, granted)
+    return EbonBuilds.Scoring.GetHighestPickedQuality(displayName, spellId, granted) == nil
 end
 
 local function MatchesClass(entry, bitVal)
@@ -84,10 +218,22 @@ function EbonBuilds.Scoring.ComputePeak(classToken, settings)
     for i = 1, #list do
         local e = list[i]
         if MatchesClass(e, bitVal) then
-            local w  = EbonBuilds.Weights.Get(e.name) or 0
-            local sc = EbonBuilds.Scoring.Score(e, w, settings)
-            if bestScore == nil or sc > bestScore then
-                bestScore, bestName = sc, e.name
+            local qualities = e.qualities or { [e.quality or 0] = true }
+            for q = 0, 4 do
+                if qualities[q] then
+                    local entry = {
+                        spellId = (e.spellIds and e.spellIds[q]) or e.spellId,
+                        name = e.name,
+                        quality = q,
+                        families = e.families,
+                        classMask = e.classMask,
+                    }
+                    local w = EbonBuilds.Weights.GetForQuality(e.name, q) or 0
+                    local sc = EbonBuilds.Scoring.Score(entry, w, settings)
+                    if bestScore == nil or sc > bestScore then
+                        bestScore, bestName = sc, e.name
+                    end
+                end
             end
         end
     end

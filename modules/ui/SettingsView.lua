@@ -30,7 +30,7 @@ local THRESHOLDS = {
       flavor = "Blocks reroll if any single offered echo scores above this threshold, regardless of the sum.",
       min = 0, max = 100, step = 1 },
     { key = "autoFreezePct",    label = "Auto-freeze %",
-      flavor = "Triggers when at least two offered echoes score above this threshold. The lowest-scored among them gets frozen, and the highest will be picked afterwards.",
+      flavor = "Freezes echoes above this threshold to save them for later.",
       min = 0, max = 100, step = 1 },
     { key = "freezePenaltyPct", label = "Freeze penalty %",
       flavor = "Reduces a frozen echo's score to give priority to unpicked choices. The penalty is applied once and persists until the echo is selected.",
