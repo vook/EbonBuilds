@@ -137,6 +137,16 @@ function EbonBuilds.Session.EndCurrentSession()
     session.endTime   = time()
     session.soulAshes = GetRunSoulAshes()
     session.maxLevel  = maxLevel
+
+    local build = EbonBuilds.Build.GetActive()
+    if build and EbonBuilds.Build.RecordRunEnd then
+        local rd = _G.EbonholdPlayerRunData
+        EbonBuilds.Build.RecordRunEnd(build, {
+            reachedMax = rd and rd.hasReachedMaxLevel or false,
+            maxLevel   = maxLevel,
+        })
+    end
+
     EbonBuildsDB.currentSessionIndex = nil
     maxLevel = 0
 end

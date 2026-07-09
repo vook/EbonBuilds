@@ -26,6 +26,41 @@ local origPerkUIShow    = nil
 local freezeRoundActive    = false  -- true after freeze batch, cleared on select
 local locallyFrozenIndices = {}     -- indices frozen this round, for penalty tracking
 local cachedPeak           = nil    -- locked at first evaluation of the run
+local lastStatsOfferSig    = nil
+
+local function ChoiceSignature(choices)
+    if not choices then return nil end
+    local parts = {}
+    for i = 1, #choices do
+        parts[i] = tostring(choices[i].spellId or 0) .. ":" .. tostring(choices[i].quality or 0)
+    end
+    return table.concat(parts, "|")
+end
+
+local function RecordOfferStats(build, choices)
+    if not build or not choices or not EbonBuilds.Build.RecordEchoOffer then return end
+    local sig = ChoiceSignature(choices)
+    if sig and sig ~= lastStatsOfferSig then
+        lastStatsOfferSig = sig
+        EbonBuilds.Build.RecordEchoOffer(build, choices)
+    end
+end
+
+local function RecordPick(build, echoName, quality)
+    if EbonBuilds.Build.RecordPick then
+        EbonBuilds.Build.RecordPick(build, echoName, quality)
+    else
+        UpdateStat(build, "picks")
+    end
+end
+
+local function RecordBanish(build, echoName)
+    if EbonBuilds.Build.RecordBanish then
+        EbonBuilds.Build.RecordBanish(build, echoName)
+    else
+        UpdateStat(build, "banishesUsed")
+    end
+end
 
 ------------------------------------------------------------------------
 -- Internal helpers
@@ -158,8 +193,16 @@ local function ScoreLockedEcho(lockedId, settings)
 end
 
 local function UpdateStat(build, key)
-    if build and build.stats then
+    if build then
+        if EbonBuilds.Build.EnsureStats then
+            EbonBuilds.Build.EnsureStats(build)
+        elseif not build.stats then
+            return
+        end
         build.stats[key] = (build.stats[key] or 0) + 1
+        if EbonBuilds.BuildOverview and EbonBuilds.BuildOverview.NotifyStatsChanged then
+            EbonBuilds.BuildOverview.NotifyStatsChanged()
+        end
     end
 end
 
@@ -194,7 +237,7 @@ local function TrySelect(scored, settings, build)
     end
 
     ProjectEbonhold.PerkService.SelectPerk(pick.spellId)
-    UpdateStat(build, "picks")
+    RecordPick(build, pick.name, pick.quality)
     return true, pick
 end
 
@@ -255,7 +298,7 @@ function EbonBuilds.Automation.Evaluate()
             for _, lockedId in ipairs(lockedList) do
                 if lockedId and lockedId == s.spellId then
                     ProjectEbonhold.PerkService.SelectPerk(s.spellId)
-                    UpdateStat(build, "picks")
+                    RecordPick(build, s.name, s.quality)
                     LogAndToast(scored, "Select (Locked)", s.index)
                     return true
                 end
@@ -274,7 +317,7 @@ function EbonBuilds.Automation.Evaluate()
                     if not s.isProtected then
                         local ok = ProjectEbonhold.PerkService.BanishPerk(s.index - 1)
                         if ok then
-                            UpdateStat(build, "banishesUsed")
+                            RecordBanish(build, s.name)
                             table.sort(scored, function(a, b) return a.index < b.index end)
                             LogAndToast(scored, "Banish", s.index)
                             return true
@@ -290,7 +333,7 @@ function EbonBuilds.Automation.Evaluate()
                     if not s.isProtected then
                         local ok = ProjectEbonhold.PerkService.BanishPerk(s.index - 1)
                         if ok then
-                            UpdateStat(build, "banishesUsed")
+                            RecordBanish(build, s.name)
                             table.sort(scored, function(a, b) return a.index < b.index end)
                             LogAndToast(scored, "Banish", s.index)
                             return true
@@ -438,6 +481,8 @@ function EbonBuilds.Automation.Init()
     -- the perk window to disappear without any action being taken.
     origPerkUIShow = PerkUI.Show
     PerkUI.Show = function(choices)
+        local build = EbonBuilds.Build.GetActive()
+        RecordOfferStats(build, choices)
         pendingChoices = choices
         StartEvalTimer()
     end

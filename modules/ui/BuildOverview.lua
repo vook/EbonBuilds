@@ -34,6 +34,7 @@ local viewFrame
 local tab1, tab2, tab3, tab4
 local contentArea
 local state = { build = nil }
+local activeOverviewTab = 1
 
 ------------------------------------------------------------------------
 -- Delete confirmation dialog
@@ -660,6 +661,9 @@ local QUALITY_COLORS = {
 local function RefreshStats()
     local build = state.build
     if not build or not statsValueLabels then return end
+    if EbonBuilds.Build.EnsureStats then
+        EbonBuilds.Build.EnsureStats(build)
+    end
     local st = build.stats or {}
     for _, row in ipairs(STAT_ROWS) do
         if statsValueLabels[row.key] then
@@ -674,10 +678,18 @@ local function RefreshStats()
             statsQualityLabels[q]:SetText(string.format("%d (%d%%)", count, pct))
         end
     end
-    local mostPickedName = next(st.mostPicked or {}) or "-"
-    statsValueLabels.mostPicked:SetText(type(mostPickedName) == "string" and mostPickedName or tostring(mostPickedName))
-    local mostBannedName = next(st.mostBanned or {}) or "-"
-    statsValueLabels.mostBanned:SetText(type(mostBannedName) == "string" and mostBannedName or tostring(mostBannedName))
+    local topPicked = EbonBuilds.Build.TopEchoStatName and EbonBuilds.Build.TopEchoStatName(st.mostPicked)
+        or nil
+    statsValueLabels.mostPicked:SetText(topPicked or "-")
+    local topBanned = EbonBuilds.Build.TopEchoStatName and EbonBuilds.Build.TopEchoStatName(st.mostBanned)
+        or nil
+    statsValueLabels.mostBanned:SetText(topBanned or "-")
+end
+
+function EbonBuilds.BuildOverview.NotifyStatsChanged()
+    if activeOverviewTab == 2 then
+        RefreshStats()
+    end
 end
 
 local function RefreshMissing()
@@ -834,6 +846,7 @@ local function BuildViewFrame()
         HideAllContent()
         overviewOuter:Show()
         overviewOuter._deleteBtn:Show()
+        activeOverviewTab = 1
         PanelTemplates_SetTab(f, 1)
         PanelTemplates_EnableTab(f, 2)
         PanelTemplates_EnableTab(f, 3)
@@ -845,6 +858,7 @@ local function BuildViewFrame()
         HideAllContent()
         overviewOuter._deleteBtn:Hide()
         statsParent:Show()
+        activeOverviewTab = 2
         PanelTemplates_SetTab(f, 2)
         PanelTemplates_EnableTab(f, 1)
         PanelTemplates_EnableTab(f, 3)
@@ -856,6 +870,7 @@ local function BuildViewFrame()
         HideAllContent()
         overviewOuter._deleteBtn:Hide()
         missingParent:Show()
+        activeOverviewTab = 3
         PanelTemplates_SetTab(f, 3)
         PanelTemplates_EnableTab(f, 1)
         PanelTemplates_EnableTab(f, 2)
@@ -867,6 +882,7 @@ local function BuildViewFrame()
         HideAllContent()
         overviewOuter._deleteBtn:Hide()
         logbookParent:Show()
+        activeOverviewTab = 4
         PanelTemplates_SetTab(f, 4)
         PanelTemplates_EnableTab(f, 1)
         PanelTemplates_EnableTab(f, 2)

@@ -87,6 +87,24 @@ function EbonBuilds.Build.Checksum(build)
     return table.concat(parts, "|")
 end
 
+local function NormalizeQualityPicks(qp)
+    if not qp then
+        return { [0] = 0, [1] = 0, [2] = 0, [3] = 0, [4] = 0 }
+    end
+    -- Legacy saves used a 1-based array; migrate to quality tier keys 0–4.
+    if qp[0] == nil and qp[1] ~= nil then
+        local out = { [0] = 0, [1] = 0, [2] = 0, [3] = 0, [4] = 0 }
+        for q = 0, 4 do
+            out[q] = tonumber(qp[q + 1]) or 0
+        end
+        return out
+    end
+    for q = 0, 4 do
+        qp[q] = tonumber(qp[q]) or 0
+    end
+    return qp
+end
+
 local function EnsureStats(build)
     build.stats = build.stats or {
         echoesSeen    = 0,
@@ -96,11 +114,11 @@ local function EnsureStats(build)
         rerollsUsed   = 0,
         banishesUsed  = 0,
         freezesUsed   = 0,
-        qualityPicks  = { 0, 0, 0, 0, 0 },
+        qualityPicks  = { [0] = 0, [1] = 0, [2] = 0, [3] = 0, [4] = 0 },
         mostPicked    = {},
         mostBanned    = {},
     }
-    build.stats.qualityPicks = build.stats.qualityPicks or { 0, 0, 0, 0, 0 }
+    build.stats.qualityPicks = NormalizeQualityPicks(build.stats.qualityPicks)
     build.stats.mostPicked   = build.stats.mostPicked   or {}
     build.stats.mostBanned   = build.stats.mostBanned   or {}
     if build.automationEnabled == nil then build.automationEnabled = true end
@@ -109,6 +127,72 @@ local function EnsureStats(build)
     if build.isPublic == nil then build.isPublic = false end
     if build.validated == nil then build.validated = false end
     if build.copiedFrom == nil then build.copiedFrom = nil end
+end
+
+EbonBuilds.Build.EnsureStats = EnsureStats
+
+local function NotifyStatsChanged()
+    if EbonBuilds.BuildOverview and EbonBuilds.BuildOverview.NotifyStatsChanged then
+        EbonBuilds.BuildOverview.NotifyStatsChanged()
+    end
+end
+
+function EbonBuilds.Build.RecordEchoOffer(build, choices)
+    if not build or not choices then return end
+    EnsureStats(build)
+    local st = build.stats
+    for i = 1, #choices do
+        st.echoesSeen = (st.echoesSeen or 0) + 1
+    end
+    NotifyStatsChanged()
+end
+
+function EbonBuilds.Build.RecordPick(build, echoName, quality)
+    if not build then return end
+    EnsureStats(build)
+    local st = build.stats
+    st.picks = (st.picks or 0) + 1
+    local q = tonumber(quality) or 0
+    st.qualityPicks[q] = (st.qualityPicks[q] or 0) + 1
+    if echoName and echoName ~= "" then
+        st.mostPicked[echoName] = (st.mostPicked[echoName] or 0) + 1
+    end
+    NotifyStatsChanged()
+end
+
+function EbonBuilds.Build.RecordBanish(build, echoName)
+    if not build then return end
+    EnsureStats(build)
+    local st = build.stats
+    st.banishesUsed = (st.banishesUsed or 0) + 1
+    if echoName and echoName ~= "" then
+        st.mostBanned[echoName] = (st.mostBanned[echoName] or 0) + 1
+    end
+    NotifyStatsChanged()
+end
+
+function EbonBuilds.Build.RecordRunEnd(build, info)
+    if not build then return end
+    EnsureStats(build)
+    info = info or {}
+    if info.reachedMax then
+        build.stats.runsCompleted = (build.stats.runsCompleted or 0) + 1
+    elseif (info.maxLevel or 0) > 1 then
+        build.stats.runsReset = (build.stats.runsReset or 0) + 1
+    end
+    NotifyStatsChanged()
+end
+
+function EbonBuilds.Build.TopEchoStatName(counts)
+    local bestName, bestCount = nil, 0
+    for name, count in pairs(counts or {}) do
+        count = tonumber(count) or 0
+        if count > bestCount then
+            bestName = name
+            bestCount = count
+        end
+    end
+    return bestName
 end
 
 local activeChangeCallbacks = {}
