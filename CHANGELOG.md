@@ -36,3 +36,4 @@ All notable changes to EbonBuilds are documented in this file.
 - Affixes tab in the build editor and overview dashboard.
 - Cheapest-apply preview and anvil integration hooks.
 - Scanned affixes included in build export/import (additive; older imports unaffected).
+- Apply-from-build opens the Enchanted Anvil when needed; anvil button restored below the title.

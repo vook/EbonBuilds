@@ -172,16 +172,50 @@ local function RefreshApplyButton()
     local canPreview, hint = EbonBuilds.AffixApply.CanPreview(build)
     if canPreview then
         applyBtn:Enable()
-        local canRun, runHint = EbonBuilds.AffixApply.CanRun(build)
-        if not canRun and runHint then
-            applyBtn._hint = runHint
-        else
-            applyBtn._hint = nil
-        end
+        applyBtn._hint = nil
     else
         applyBtn:Disable()
         applyBtn._hint = hint or "Cannot preview affix changes right now."
     end
+end
+
+local function EnsureAnvilForApply(thenFn)
+    if EbonBuilds.AnvilIntegration and EbonBuilds.AnvilIntegration.EnsureOpen then
+        EbonBuilds.AnvilIntegration.EnsureOpen()
+    end
+    if C_Timer and C_Timer.After then
+        C_Timer.After(0.1, thenFn)
+    else
+        thenFn()
+    end
+end
+
+local function TryStartApplyFromPreview()
+    if not pendingApplySummary or pendingApplySummary.applyCount < 1 then return end
+    local build = GetBuildForApply()
+    if not build or not EbonBuilds.AffixApply then return end
+
+    local function confirmApply()
+        local canRun, hint = EbonBuilds.AffixApply.CanRun(build)
+        if not canRun then
+            if EbonBuilds.Toast then EbonBuilds.Toast.Show(hint or "Cannot apply right now.") end
+            return
+        end
+        if previewDialog then previewDialog:Hide() end
+        local costLine = ""
+        if pendingApplySummary.totalCost > 0 and EbonBuilds.AffixApply then
+            costLine = "\n\nEstimated cost: " .. EbonBuilds.AffixApply.FormatCost(pendingApplySummary.totalCost)
+        end
+        StaticPopupDialogs["EBONBUILDS_APPLY_AFFIXES"].text = string.format(
+            "Apply %d affix change%s at the Enchanted Anvil?%s\n\nKeep the anvil open until finished.",
+            pendingApplySummary.applyCount,
+            pendingApplySummary.applyCount == 1 and "" or "s",
+            costLine
+        )
+        StaticPopup_Show("EBONBUILDS_APPLY_AFFIXES")
+    end
+
+    EnsureAnvilForApply(confirmApply)
 end
 
 local function RefreshListScroll()
@@ -486,27 +520,7 @@ local function EnsurePreviewDialog()
     applyConfirm:SetText("Apply")
     f._applyBtn = applyConfirm
     applyConfirm:SetScript("OnClick", function()
-        if not pendingApplySummary or pendingApplySummary.applyCount < 1 then return end
-        local build = GetBuildForApply()
-        if EbonBuilds.AffixApply and build then
-            local canRun, hint = EbonBuilds.AffixApply.CanRun(build)
-            if not canRun then
-                if EbonBuilds.Toast then EbonBuilds.Toast.Show(hint or "Cannot apply right now.") end
-                return
-            end
-        end
-        f:Hide()
-        local costLine = ""
-        if pendingApplySummary.totalCost > 0 and EbonBuilds.AffixApply then
-            costLine = "\n\nEstimated cost: " .. EbonBuilds.AffixApply.FormatCost(pendingApplySummary.totalCost)
-        end
-        StaticPopupDialogs["EBONBUILDS_APPLY_AFFIXES"].text = string.format(
-            "Apply %d affix change%s at the Enchanted Anvil?%s\n\nKeep the anvil open until finished.",
-            pendingApplySummary.applyCount,
-            pendingApplySummary.applyCount == 1 and "" or "s",
-            costLine
-        )
-        StaticPopup_Show("EBONBUILDS_APPLY_AFFIXES")
+        TryStartApplyFromPreview()
     end)
 
     local cancelBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
@@ -774,6 +788,7 @@ local function BuildViewFrame(parent)
 
     local refreshElapsed = 0
     f:SetScript("OnUpdate", function(_, elapsed)
+        if not f:IsVisible() then return end
         refreshElapsed = refreshElapsed + elapsed
         if refreshElapsed >= 0.5 then
             refreshElapsed = 0
@@ -876,34 +891,42 @@ function EbonBuilds.AffixView.Init()
         button2 = "Cancel",
         OnAccept = function()
             if not pendingApplyPlan or not EbonBuilds.AffixApply then return end
-            local steps = {}
-            for _, step in ipairs(pendingApplyPlan) do
-                if not step.skipReason then
-                    steps[#steps + 1] = step
+            local function runQueue()
+                local steps = {}
+                for _, step in ipairs(pendingApplyPlan) do
+                    if not step.skipReason then
+                        steps[#steps + 1] = step
+                    end
                 end
-            end
-            if #steps == 0 then
-                if EbonBuilds.Toast then EbonBuilds.Toast.Show("Nothing to apply.") end
-                return
-            end
-            local costText = ""
-            if pendingApplySummary and pendingApplySummary.totalCost > 0 then
-                costText = string.format(" (~%dg est.)", math.floor(pendingApplySummary.totalCost / 10000))
-            end
-            if EbonBuilds.Toast then
-                EbonBuilds.Toast.Show(string.format("Applying %d affix change%s%s…", #steps, #steps == 1 and "" or "s", costText))
-            end
-            EbonBuilds.AffixApply.RunPlan(pendingApplyPlan, function(idx, total, step)
-                if EbonBuilds.Toast and step then
-                    EbonBuilds.Toast.Show(string.format("Applying %d/%d: %s", idx, total, step.toAffix))
+                if #steps == 0 then
+                    if EbonBuilds.Toast then EbonBuilds.Toast.Show("Nothing to apply.") end
+                    return
                 end
-            end, function()
-                RefreshList()
-                RefreshApplyButton()
-                if EbonBuilds.AnvilIntegration and EbonBuilds.AnvilIntegration.RefreshButton then
-                    EbonBuilds.AnvilIntegration.RefreshButton()
+                local canRun, hint = EbonBuilds.AffixApply.CanRun(GetBuildForApply())
+                if not canRun then
+                    if EbonBuilds.Toast then EbonBuilds.Toast.Show(hint or "Cannot apply right now.") end
+                    return
                 end
-            end)
+                local costText = ""
+                if pendingApplySummary and pendingApplySummary.totalCost > 0 then
+                    costText = string.format(" (~%dg est.)", math.floor(pendingApplySummary.totalCost / 10000))
+                end
+                if EbonBuilds.Toast then
+                    EbonBuilds.Toast.Show(string.format("Applying %d affix change%s%s…", #steps, #steps == 1 and "" or "s", costText))
+                end
+                EbonBuilds.AffixApply.RunPlan(pendingApplyPlan, function(idx, total, step)
+                    if EbonBuilds.Toast and step then
+                        EbonBuilds.Toast.Show(string.format("Applying %d/%d: %s", idx, total, step.toAffix))
+                    end
+                end, function()
+                    RefreshList()
+                    RefreshApplyButton()
+                    if EbonBuilds.AnvilIntegration and EbonBuilds.AnvilIntegration.RefreshButton then
+                        EbonBuilds.AnvilIntegration.RefreshButton()
+                    end
+                end)
+            end
+            EnsureAnvilForApply(runQueue)
         end,
         timeout = 0,
         whileDead = true,

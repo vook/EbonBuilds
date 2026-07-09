@@ -24,6 +24,17 @@ local function Toast(msg)
     end
 end
 
+local function IsAnvilOpen()
+    if EbonBuilds.AnvilIntegration and EbonBuilds.AnvilIntegration.IsOpen then
+        return EbonBuilds.AnvilIntegration.IsOpen()
+    end
+    if ExtractionUI and ExtractionUI.IsOpen and ExtractionUI.IsOpen() then
+        return true
+    end
+    local frame = _G.EbonholdExtractionFrame
+    return frame and frame.IsShown and frame:IsShown()
+end
+
 function EbonBuilds.AffixApply.FormatCost(copper)
     if not copper or copper <= 0 then return "0g" end
     local gold = math.floor(copper / 10000)
@@ -383,7 +394,7 @@ function EbonBuilds.AffixApply.CanRun(build)
     if not canPreview then
         return false, previewHint
     end
-    if not (_G.ExtractionUI and ExtractionUI.IsOpen and ExtractionUI.IsOpen()) then
+    if not IsAnvilOpen() then
         return false, "Open the Enchanted Anvil first."
     end
     local _, summary = EbonBuilds.AffixApply.BuildPlan(build)
@@ -427,7 +438,7 @@ local function AdvanceQueue()
         return
     end
 
-    if not (ExtractionUI and ExtractionUI.IsOpen and ExtractionUI.IsOpen()) then
+    if not IsAnvilOpen() then
         Toast("Enchanted Anvil closed — apply queue stopped.")
         FinishQueue(false, "anvil closed")
         return
