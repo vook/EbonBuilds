@@ -46,6 +46,14 @@ local state = {
 function EbonBuilds.BuildForm.GetEditingClass()
     return state.class
 end
+
+function EbonBuilds.BuildForm.GetEditingBuild()
+    if state.mode == "edit" and state.id then
+        return EbonBuilds.Build.Get(state.id)
+    end
+    return nil
+end
+
 function EbonBuilds.BuildForm.GetEditingSettings()
     if not state.settings then
         state.settings = EbonBuilds.Build.DefaultSettings()
@@ -423,21 +431,26 @@ local function OnSave()
             settings = state.settings,
             isPublic = state.isPublic,
             echoWeights = weights,
+            scannedAffixes = EbonBuildsDB.pendingScannedAffixes,
         })
         state.mode = "edit"
         state.id   = b.id
         EbonBuilds.Build.SetActive(b.id)
     else
+        local build = EbonBuilds.Build.Get(state.id)
         EbonBuilds.Build.Save(state.id, {
             title = state.title, class = state.class, spec = state.spec,
             comments = state.comments, lockedEchoes = { unpack(state.locked) },
             settings = state.settings,
             isPublic = state.isPublic,
             echoWeights = weights,
+            scannedAffixes = EbonBuildsDB.pendingScannedAffixes
+                or (build and build.scannedAffixes),
         })
     end
     EbonBuildsDB._isEditingBuild = nil
     EbonBuildsDB.pendingWeights = nil
+    EbonBuildsDB.pendingScannedAffixes = nil
     EbonBuildsDB._wizardPrefill = nil
     if EbonBuilds.BuildList and EbonBuilds.BuildList.Refresh then
         EbonBuilds.BuildList.Refresh()
@@ -544,6 +557,19 @@ local function CloneSettings(src)
     return dst
 end
 
+local function CloneScannedAffixStore(store)
+    if not store then return nil end
+    local out = { activeSource = store.activeSource, scans = {} }
+    for source, scan in pairs(store.scans or {}) do
+        out.scans[source] = {
+            source    = scan.source or source,
+            scannedAt = scan.scannedAt,
+            names     = EbonBuilds.Build.CoerceAffixNameList(scan.names),
+        }
+    end
+    return out
+end
+
 LoadFromBuild = function(build)
     state.mode     = "edit"
     state.id       = build.id
@@ -556,6 +582,13 @@ LoadFromBuild = function(build)
     for i = 1, 5 do state.locked[i] = build.lockedEchoes and build.lockedEchoes[i] or nil end
     EbonBuildsDB._isEditingBuild = true
     EbonBuildsDB.pendingWeights = {}
+    EbonBuildsDB.pendingScannedAffixes = nil
+    if build.scannedAffixes then
+        local store = EbonBuilds.Build.NormalizeScannedAffixes(build.scannedAffixes)
+        if store then
+            EbonBuildsDB.pendingScannedAffixes = CloneScannedAffixStore(store)
+        end
+    end
     if build.echoWeights then
         for name, weight in pairs(build.echoWeights) do
             EbonBuildsDB.pendingWeights[name] = weight
@@ -575,6 +608,7 @@ local function LoadDefaults()
     for i = 1, 5 do state.locked[i] = nil end
     EbonBuildsDB._isEditingBuild = true
     EbonBuildsDB.pendingWeights = {}
+    EbonBuildsDB.pendingScannedAffixes = nil
     EbonBuildsDB._wizardPrefill = nil
 end
 
