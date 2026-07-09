@@ -8,6 +8,8 @@ core/Init.lua
 modules/build/Build.lua
 modules/data/SpecData.lua
 modules/data/EchoLocations.lua
+modules/data/EchoSourceMeta.lua
+modules/data/EchoSources.lua
 modules/data/EchoOwnership.lua
 modules/gear/AffixScan.lua
 modules/gear/AffixApply.lua

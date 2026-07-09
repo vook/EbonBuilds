@@ -62,7 +62,7 @@ Locked echoes support up to **6 slots**. EbonBuilds detects available slots from
 
 **Stats** â€” echoes seen, runs completed, picks, rerolls/banishes/freezes used, quality distribution, and the most picked and banned echoes. 
 
-**Collection** â€” echoes relevant to your build with drop source, rolled status, tome ownership, base weight, and score. Filter by tome requirement, multi-rank echoes, and class visibility.
+**Collection** â€” echoes relevant to your build with drop source, rolled status, tome ownership, base weight, and score. Filter by tome requirement, multi-rank echoes, class visibility, and drop source (open-world regions and raids).
 
 **Policies** â€” echoes with non-default automation policies for quick review and editing.
 

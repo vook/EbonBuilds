@@ -60,3 +60,10 @@ All notable changes to EbonBuilds are documented in this file.
 
 ### Echo ownership
 - Removed legacy spellbook/`IsSpellKnown` tome checks; owned column uses `echoDiscovery` and `cachedPerkCounts` only.
+
+### Collection source filters
+- Regenerated echo location data from the World of Echoes API (`assets/data/tomes.json`).
+- Collection tab adds a **Sources** dropdown to filter by open-world region (Northrend, Kalimdor, Eastern Kingdoms, Outland) or raid (Naxxramas, Ulduar, Trial of the Crusader, Icecrown Citadel, Onyxia's Lair, and more).
+- Source filter supports **All Open World**, **All Raids**, **No Tome Required**, **Unknown Source** (tomes with no resolved drop location), and **Clear all filters**.
+- Source filter selections reset on `/reload` and relog (not saved across sessions).
+- Icecrown Citadel echoes classify from native `PerkDropSources` text when not yet present on the community map.
