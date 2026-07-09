@@ -28,6 +28,7 @@ local hooksInstalled    = false
 local freezeRoundActive       = false
 local locallyFrozenIndices    = {}
 local seenEchoFamilies        = {}
+local echoOffersThisRun       = 0
 
 local SHOW_DEBOUNCE     = 0.5
 local lastShowChoices   = nil
@@ -222,10 +223,11 @@ local function OnEchoOfferShown(choices)
     if suppressAutoHook then return end
     if not choices or #choices == 0 then return end
     local build = EbonBuilds.Build.GetActive()
-    if build and EbonBuilds.Build.RecordEchoOffer then
-        local sig = ChoiceSignature(choices)
-        if sig and sig ~= lastStatsOfferSig then
-            lastStatsOfferSig = sig
+    local sig = ChoiceSignature(choices)
+    if sig and sig ~= lastStatsOfferSig then
+        lastStatsOfferSig = sig
+        echoOffersThisRun = echoOffersThisRun + 1
+        if build and EbonBuilds.Build.RecordEchoOffer then
             EbonBuilds.Build.RecordEchoOffer(build, choices)
         end
     end
@@ -339,6 +341,12 @@ function EbonBuilds.Automation.ResetPeakCache()
     if EbonBuilds.Scoring and EbonBuilds.Scoring.ResetCache then
         EbonBuilds.Scoring.ResetCache()
     end
+end
+
+function EbonBuilds.Automation.ResetRunState()
+    echoOffersThisRun = 0
+    lastStatsOfferSig = nil
+    EbonBuilds.Automation.ResetPeakCache()
 end
 
 local function MarkEchoFamilySeen(spellId, displayName, grantedKey)
@@ -885,7 +893,8 @@ function EbonBuilds.Automation.Evaluate()
     pendingWaitCount = 0
 
     local rerollsLeft = GetAvailableRerolls(runData)
-    if not InAutoFreezeRound() and rerollsLeft > 0 then
+    local skipFirstOfferReroll = echoOffersThisRun <= 1
+    if not skipFirstOfferReroll and not InAutoFreezeRound() and rerollsLeft > 0 then
         -- Reroll guard: skip if any single echo is above the guard threshold,
         -- regardless of the sum. Prevents rerolling when one good echo is
         -- offered alongside weak ones.
@@ -1015,16 +1024,7 @@ hookRetryFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 hookRetryFrame:RegisterEvent("PLAYER_LEVEL_UP")
 hookRetryFrame:SetScript("OnEvent", function(_, event, ...)
     if event == "PLAYER_LEVEL_UP" then
-        local newLevel = ...
         ResetAutomationRound({ clearDebounce = true })
-        if newLevel and newLevel > 1 and not UnitIsDeadOrGhost("player")
-            and EbonBuilds.Automation.IsEnabled() then
-            C_Timer.After(0, function()
-                if not UnitIsDeadOrGhost("player") then
-                    EbonBuilds.Automation.GetPeak()
-                end
-            end)
-        end
         return
     end
     EbonBuilds.Automation.EnsureHooked()

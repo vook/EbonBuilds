@@ -314,3 +314,8 @@ end
 function EbonBuilds.MainWindow.GetRightPanel()
     return EbonBuilds.MainWindow._right
 end
+
+function EbonBuilds.MainWindow.IsVisible()
+    local frame = EbonBuilds.MainWindow._frame
+    return frame and frame:IsVisible()
+end

@@ -74,11 +74,6 @@ function EbonBuilds.OpenEchoJournal()
         ChatEdit_SendText(editBox)
     end
 
-    local main = EbonBuilds.MainWindow and EbonBuilds.MainWindow._frame
-    if main and main.Hide then
-        main:Hide()
-    end
-
     -- /echoes can create/show its frame asynchronously.
     if not FocusEchoJournalFrame() and C_Timer and C_Timer.After then
         C_Timer.After(0, FocusEchoJournalFrame)

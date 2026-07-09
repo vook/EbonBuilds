@@ -1198,7 +1198,7 @@ local function BuildMissingTab(parent)
     tomeHdr:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
         GameTooltip:SetText("Owned", 1, 0.82, 0)
-        GameTooltip:AddLine("Checked when the echo's discovery tome is in your spellbook.", 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine("Checked when the echo is discovered on your account.", 0.8, 0.8, 0.8, true)
         GameTooltip:Show()
     end)
     tomeHdr:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1926,25 +1926,34 @@ local function BuildViewFrame()
     PanelTemplates_SetNumTabs(f, 6)
     PanelTemplates_SetTab(f, 1)
 
-    local spellEventFrame = CreateFrame("Frame")
-    spellEventFrame:RegisterEvent("SPELLS_CHANGED")
-    spellEventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-    spellEventFrame:SetScript("OnEvent", function(_, event)
-        if event == "PLAYER_ENTERING_WORLD" and EbonBuilds.EchoOwnership then
+    local function IsCollectionTabVisible()
+        return activeOverviewTab == 3
+            and missingParent
+            and missingParent:IsVisible()
+            and EbonBuilds.MainWindow
+            and EbonBuilds.MainWindow.IsVisible
+            and EbonBuilds.MainWindow.IsVisible()
+    end
+
+    local function RefreshCollectionIfVisible()
+        if not IsCollectionTabVisible() then return end
+        if RefreshMissing then RefreshMissing() end
+    end
+
+    local refreshFrame = CreateFrame("Frame")
+    refreshFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    refreshFrame:SetScript("OnEvent", function()
+        if EbonBuilds.EchoOwnership then
             EbonBuilds.EchoOwnership.Invalidate()
         end
-        if EbonBuilds.EchoTableRows.InvalidateTomeCache then
-            EbonBuilds.EchoTableRows.InvalidateTomeCache()
-        end
-        if activeOverviewTab == 3 and RefreshMissing then
-            RefreshMissing()
-        end
+        RefreshCollectionIfVisible()
     end)
 
     local collectionRefreshTicker = CreateFrame("Frame")
     collectionRefreshTicker.elapsed = 0
     collectionRefreshTicker:SetScript("OnUpdate", function(self, dt)
-        if activeOverviewTab ~= 3 or not missingParent or not missingParent:IsShown() then
+        if not IsCollectionTabVisible() then
+            self.elapsed = 0
             return
         end
         self.elapsed = self.elapsed + dt

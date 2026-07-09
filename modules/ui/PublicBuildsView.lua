@@ -574,6 +574,7 @@ local function BuildViewFrame(parent)
         EbonBuilds.Sync.RequestSync()
     end)
     refreshBtn:SetScript("OnUpdate", function()
+        if not f:IsVisible() then return end
         local remaining = EbonBuilds.Sync.GetCooldownRemaining()
         if remaining > 0 then
             refreshBtn:Disable()

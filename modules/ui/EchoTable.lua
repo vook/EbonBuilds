@@ -253,7 +253,7 @@ local function CreateHeaders(parent, top)
     tomeHdr:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
         GameTooltip:SetText("Owned", 1, 0.82, 0)
-        GameTooltip:AddLine("Checked when the echo's discovery tome is in your spellbook.", 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine("Checked when the echo is discovered on your account.", 0.8, 0.8, 0.8, true)
         GameTooltip:Show()
     end)
     tomeHdr:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -482,21 +482,9 @@ function EbonBuilds.EchoTable.Init(parent)
     SyncChildWidth(scrollFrame, scrollChild)
     UpdateScrollRange()
     RefreshRows()
-
-    local spellEventFrame = CreateFrame("Frame")
-    spellEventFrame:RegisterEvent("SPELLS_CHANGED")
-    spellEventFrame:SetScript("OnEvent", function()
-        if EbonBuilds.EchoTableRows.InvalidateTomeCache then
-            EbonBuilds.EchoTableRows.InvalidateTomeCache()
-        end
-        RefreshRows()
-    end)
 end
 
 function EbonBuilds.EchoTable.Refresh()
-    if EbonBuilds.EchoTableRows.InvalidateTomeCache then
-        EbonBuilds.EchoTableRows.InvalidateTomeCache()
-    end
     if RefreshRows then
         RefreshRows()
     end

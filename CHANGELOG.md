@@ -49,3 +49,14 @@ All notable changes to EbonBuilds are documented in this file.
 - Locked-echo UI supports up to 6 slots across build editor, overview, wizard, build list, and public builds cards.
 - Locked-echo serialization/import/export paths now normalize slot arrays up to 6 entries.
 - Locked-slot detection was hardened to avoid calling runtime perk APIs from hot scoring/automation paths.
+
+### Performance
+- Collection and echoes editor no longer refresh on `SPELLS_CHANGED` (legacy spellbook signal); refresh is gated to visible UI and periodic collection polling.
+- Background `OnUpdate` handlers (affix apply button, public builds reload cooldown) skip work while their parent window is hidden.
+- Removed eager peak-score recomputation on every level-up.
+
+### Automation
+- Skip auto-reroll on the first echo offer of each run (banish/freeze/pick still apply).
+
+### Echo ownership
+- Removed legacy spellbook/`IsSpellKnown` tome checks; owned column uses `echoDiscovery` and `cachedPerkCounts` only.
