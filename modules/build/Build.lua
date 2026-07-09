@@ -4,7 +4,7 @@
 
 EbonBuilds.Build = {}
 
-EbonBuilds.Build.LOCKED_SLOTS = 5
+EbonBuilds.Build.LOCKED_SLOTS = 6
 
 local function DefaultSettings()
     return {
@@ -187,7 +187,7 @@ function EbonBuilds.Build.Migrate()
             class           = PlayerClassToken(),
             spec            = PlayerTopTalentTab(),
             comments        = "",
-            lockedEchoes = { nil, nil, nil, nil, nil },
+            lockedEchoes = { nil, nil, nil, nil, nil, nil },
             echoWeights     = legacy,
             settings        = DefaultSettings(),
             version         = 1,
@@ -299,7 +299,7 @@ function EbonBuilds.Build.NewObject(data)
         class           = data.class or PlayerClassToken(),
         spec            = data.spec or PlayerTopTalentTab(),
         comments        = data.comments or "",
-        lockedEchoes = data.lockedEchoes or { nil, nil, nil, nil, nil },
+        lockedEchoes = data.lockedEchoes or { nil, nil, nil, nil, nil, nil },
         echoWeights     = data.echoWeights or {},
         settings        = data.settings or DefaultSettings(),
         version         = 1,
@@ -339,7 +339,7 @@ function EbonBuilds.Build.UpdateFromPublic(localBuild, publicBuild)
     localBuild.class            = publicBuild.class            or localBuild.class
     localBuild.spec             = publicBuild.spec             or localBuild.spec
     localBuild.comments         = publicBuild.comments         or localBuild.comments
-    localBuild.lockedEchoes     = { nil, nil, nil, nil, nil }
+    localBuild.lockedEchoes     = { nil, nil, nil, nil, nil, nil }
     for i = 1, EbonBuilds.Build.LOCKED_SLOTS do
         localBuild.lockedEchoes[i] = (publicBuild.lockedEchoes and publicBuild.lockedEchoes[i]) or nil
     end

@@ -101,7 +101,7 @@ function EbonBuilds.Scoring.GetEffectiveLockedEchoes()
     end
     local build = EbonBuilds.Build.GetActive()
     if build and build.lockedEchoes then return build.lockedEchoes end
-    return { nil, nil, nil, nil, nil }
+    return { nil, nil, nil, nil, nil, nil }
 end
 
 function EbonBuilds.Scoring.IsLocked(spellId)

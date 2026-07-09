@@ -311,7 +311,7 @@ local function BuildOverviewTab(parent)
     outer._lockedHeader = lockedHeader
 
     local lockedButtons = {}
-    for i = 1, 5 do
+    for i = 1, EbonBuilds.Build.LOCKED_SLOTS do
         local btn = CreateIconButton(outer, 36)
         btn:SetPoint("TOPLEFT", lockedHeader, "BOTTOMLEFT", (i - 1) * 42, -6)
         local border = btn:CreateTexture(nil, "BORDER")
@@ -622,7 +622,7 @@ local function RefreshOverview()
     overviewDescSmf:AddMessage(desc, 0.8, 0.8, 0.8, 1.0)
     overviewDescMeasure:SetText(desc)
 
-    for i = 1, 5 do
+    for i = 1, EbonBuilds.Build.LOCKED_SLOTS do
         local btn = overviewOuter._lockedButtons[i]
         local spellId = build.lockedEchoes and build.lockedEchoes[i]
         if spellId then

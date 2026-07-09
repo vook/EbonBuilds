@@ -218,7 +218,7 @@ local function BuildExportData(build)
 		class = build.class,
 		spec = build.spec,
 		comments = build.comments,
-		lockedEchoes = build.lockedEchoes or { nil, nil, nil, nil, nil },
+		lockedEchoes = build.lockedEchoes or { nil, nil, nil, nil, nil, nil },
 		echoWeights = filteredWeights,
 		settings = build.settings,
 		automationEnabled = build.automationEnabled,
