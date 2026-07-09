@@ -171,9 +171,6 @@ function EbonBuilds.EchoTableRows.InvalidateTomeCache()
     if EbonBuilds.Scoring and EbonBuilds.Scoring.ResetCache then
         EbonBuilds.Scoring.ResetCache()
     end
-    if EbonBuilds.PlayerRunScore and EbonBuilds.PlayerRunScore.Invalidate then
-        EbonBuilds.PlayerRunScore.Invalidate()
-    end
 end
 
 function EbonBuilds.EchoTableRows.IsTomeInSpellbook(tomeSpellId)
@@ -488,14 +485,279 @@ function EbonBuilds.EchoTableRows.GetSortScore(entry)
 end
 
 function EbonBuilds.EchoTableRows.GetPolicyOrdinal(name)
+    local policy = EbonBuilds.Build.GetEchoPolicy(name)
+    for i, p in ipairs(EbonBuilds.Build.GetPolicyList()) do
+        if p.id == policy then return i end
+    end
     return 1
 end
 
 function EbonBuilds.EchoTableRows.SyncPolicyDropdown(dropdown)
+    if not dropdown or not dropdown._echoName then return end
+    local policy = EbonBuilds.Build.GetEchoPolicy(dropdown._echoName)
+    local info = EbonBuilds.Build.GetEchoPolicyInfo(policy)
+    UIDropDownMenu_SetText(dropdown, info.short or "Normal")
+end
+
+local function ShowPolicyTooltip(owner, echoName)
+    if not echoName or echoName == "" then return end
+    local policy = EbonBuilds.Build.GetEchoPolicy(echoName)
+    local info = EbonBuilds.Build.GetEchoPolicyInfo(policy)
+    GameTooltip:SetOwner(owner, "ANCHOR_LEFT")
+    GameTooltip:SetText("Automation Policy", 1, 0.82, 0)
+    GameTooltip:AddLine("Current: " .. (info.title or policy), 1, 1, 1)
+    if info.desc and info.desc ~= "" then
+        GameTooltip:AddLine(info.desc, 0.8, 0.8, 0.8, true)
+    elseif info.menuDesc and info.menuDesc ~= "" then
+        GameTooltip:AddLine(info.menuDesc, 0.8, 0.8, 0.8, true)
+    end
+    GameTooltip:Show()
+end
+
+local POLICY_MENU_PAD_X = 12
+local POLICY_MENU_BORDER_FUDGE = 10
+local POLICY_ROW_HEIGHT = 32
+local POLICY_ROW_GAP = 3
+local POLICY_PAD_Y = 8
+local DEFAULT_DROPDOWN_BUTTON_HEIGHT = UIDROPDOWNMENU_BUTTON_HEIGHT or 16
+
+local policyMenuMeasureFS
+local policyMenuWidthCache
+local policyPopup
+
+local function GetPolicyMenuWidth()
+    if policyMenuWidthCache then return policyMenuWidthCache end
+    if not policyMenuMeasureFS then
+        policyMenuMeasureFS = UIParent:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        policyMenuMeasureFS:Hide()
+    end
+    local maxW = 0
+    for _, p in ipairs(EbonBuilds.Build.GetPolicyList()) do
+        policyMenuMeasureFS:SetText(p.title)
+        maxW = math.max(maxW, policyMenuMeasureFS:GetStringWidth() or 0)
+        local sub = p.menuDesc or p.desc or ""
+        if sub ~= "" then
+            policyMenuMeasureFS:SetText(sub)
+            maxW = math.max(maxW, policyMenuMeasureFS:GetStringWidth() or 0)
+        end
+    end
+    policyMenuWidthCache = math.ceil(maxW) + POLICY_MENU_PAD_X * 2 + POLICY_MENU_BORDER_FUDGE
+    return policyMenuWidthCache
+end
+
+-- DropDownList1 is shared globally; restore defaults once if an older build touched it.
+local function RestoreSharedDropDownLists()
+    for i = 1, (UIDROPDOWNMENU_MAXLEVELS or 2) do
+        local list = _G["DropDownList" .. i]
+        if not list then break end
+        for j = 1, (UIDROPDOWNMENU_MAXBUTTONS or 32) do
+            local btn = _G[list:GetName() .. "Button" .. j]
+            if btn then
+                btn:SetHeight(DEFAULT_DROPDOWN_BUTTON_HEIGHT)
+            end
+        end
+    end
+end
+
+local function HidePolicyPopup()
+    if policyPopup and policyPopup._root then
+        policyPopup._root:Hide()
+    end
+end
+
+local function FindMainWindowFrame(anchor)
+    local p = anchor
+    while p do
+        if p.GetName and p:GetName() == "EbonBuildsMainWindow" then
+            return p
+        end
+        p = p:GetParent()
+    end
+    if EbonBuilds.MainWindow and EbonBuilds.MainWindow._frame then
+        return EbonBuilds.MainWindow._frame
+    end
+    return UIParent
+end
+
+local function EnsurePolicyPopup()
+    if policyPopup then return policyPopup end
+
+    local root = CreateFrame("Frame", "EbonBuildsPolicyPopupRoot", UIParent)
+    root:SetFrameStrata("DIALOG")
+    root:SetToplevel(true)
+    root:Hide()
+
+    local backdrop = CreateFrame("Button", nil, root)
+    backdrop:SetFrameLevel(1)
+    backdrop:SetAllPoints(root)
+    backdrop:RegisterForClicks("AnyUp")
+    backdrop:SetScript("OnClick", HidePolicyPopup)
+
+    local f = CreateFrame("Frame", "EbonBuildsPolicyPopup", root)
+    f:SetFrameLevel(10)
+    f:EnableMouse(true)
+    f:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile = true, tileSize = 32, edgeSize = 32,
+        insets = { left = 11, right = 12, top = 12, bottom = 11 },
+    })
+    f:SetBackdropColor(0, 0, 0, 0.92)
+    f:SetScript("OnMouseDown", function() end)
+
+    f.rows = {}
+    for i, p in ipairs(EbonBuilds.Build.GetPolicyList()) do
+        local row = CreateFrame("Button", nil, f)
+        row:EnableMouse(true)
+        row:SetHeight(POLICY_ROW_HEIGHT)
+        row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        row._policyId = p.id
+
+        row._highlight = row:CreateTexture(nil, "BACKGROUND")
+        row._highlight:SetAllPoints(row)
+        row._highlight:SetTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+        row._highlight:SetBlendMode("ADD")
+        row._highlight:Hide()
+
+        row._title = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row._title:SetPoint("TOPLEFT", row, "TOPLEFT", POLICY_MENU_PAD_X, -3)
+        row._title:SetText(p.title)
+
+        row._desc = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        row._desc:SetPoint("TOPLEFT", row._title, "BOTTOMLEFT", 0, -1)
+        row._desc:SetPoint("RIGHT", row, "RIGHT", -POLICY_MENU_PAD_X, 0)
+        row._desc:SetJustifyH("LEFT")
+        row._desc:SetText(p.menuDesc or p.desc or "")
+
+        local function SelectPolicyRow(self)
+            local popup = policyPopup
+            if not popup or not popup._echoName then return end
+            EbonBuilds.Build.SetEchoPolicy(popup._echoName, self._policyId)
+            if popup._anchor then
+                EbonBuilds.EchoTableRows.SyncPolicyDropdown(popup._anchor)
+            end
+            if popup._onChanged then popup._onChanged() end
+            HidePolicyPopup()
+        end
+
+        row:SetScript("OnEnter", function(self)
+            self._highlight:Show()
+        end)
+        row:SetScript("OnLeave", function(self)
+            self._highlight:Hide()
+        end)
+        row:SetScript("OnClick", SelectPolicyRow)
+        row:SetScript("OnMouseUp", function(self, button)
+            if button == "LeftButton" then SelectPolicyRow(self) end
+        end)
+
+        f.rows[i] = row
+    end
+
+    f._root = root
+    f._backdrop = backdrop
+    policyPopup = f
+    return f
+end
+
+local function ShowPolicyPopup(anchor, echoName, onChanged)
+    if not anchor or not echoName then return end
+    local f = EnsurePolicyPopup()
+    local root = f._root
+    f._anchor = anchor
+    f._echoName = echoName
+    f._onChanged = onChanged
+
+    local win = FindMainWindowFrame(anchor)
+    root:SetParent(win)
+    root:ClearAllPoints()
+    root:SetAllPoints(win)
+    root:SetFrameLevel((win.GetFrameLevel and win:GetFrameLevel() or 0) + 50)
+
+    local policies = EbonBuilds.Build.GetPolicyList()
+    local width = GetPolicyMenuWidth()
+    f:SetWidth(width)
+
+    local y = -POLICY_PAD_Y
+    for i, row in ipairs(f.rows) do
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", f, "TOPLEFT", 0, y)
+        row:SetPoint("TOPRIGHT", f, "TOPRIGHT", 0, y)
+        row:SetHeight(POLICY_ROW_HEIGHT)
+        row:Show()
+        y = y - POLICY_ROW_HEIGHT - POLICY_ROW_GAP
+    end
+
+    local count = #policies
+    local height = POLICY_PAD_Y + count * POLICY_ROW_HEIGHT
+        + math.max(0, count - 1) * POLICY_ROW_GAP + POLICY_PAD_Y
+    f:SetHeight(height)
+
+    f:ClearAllPoints()
+    f:SetPoint("TOPRIGHT", anchor, "BOTTOMRIGHT", 0, -2)
+
+    root:Show()
+    f._backdrop:Show()
+    f:Show()
+    if f.Raise then f:Raise() end
+end
+
+local function EnsurePolicyDropDownHooks()
+    if EbonBuilds.EchoTableRows._policyDropDownHooks then return end
+    EbonBuilds.EchoTableRows._policyDropDownHooks = true
+    RestoreSharedDropDownLists()
 end
 
 function EbonBuilds.EchoTableRows.CreatePolicyDropdown(parent, opts)
-    return nil
+    opts = opts or {}
+    policyDdSerial = policyDdSerial + 1
+    local width = opts.width or (COL_POLICY - 4)
+    local dd = CreateFrame("Frame", "EbonBuildsEchoPolicyDD" .. policyDdSerial, parent, "UIDropDownMenuTemplate")
+    if opts.anchorFn then
+        opts.anchorFn(dd, parent)
+    else
+        local inset = opts.rightInset or C.GetPolicyRightInset()
+        local colW = opts.columnWidth or COL_POLICY
+        C.AnchorColumnRight(dd, parent, inset, colW)
+    end
+    UIDropDownMenu_SetWidth(dd, width)
+    UIDropDownMenu_SetText(dd, "Normal")
+    dd._ebonPolicyMenu = true
+    EnsurePolicyDropDownHooks()
+
+    local onChanged = opts.onChanged
+    UIDropDownMenu_Initialize(dd, function() end)
+
+    local ddButton = _G[dd:GetName() .. "Button"]
+    if ddButton then
+        ddButton:SetScript("OnClick", function()
+            if policyPopup and policyPopup:IsShown() and policyPopup._anchor == dd then
+                HidePolicyPopup()
+                return
+            end
+            HidePolicyPopup()
+            ShowPolicyPopup(dd, dd._echoName, function()
+                if onChanged then
+                    onChanged()
+                elseif onWeightChanged then
+                    onWeightChanged()
+                end
+            end)
+        end)
+        ddButton:HookScript("OnEnter", function()
+            ShowPolicyTooltip(ddButton, dd._echoName)
+        end)
+        ddButton:HookScript("OnLeave", function()
+            GameTooltip:Hide()
+        end)
+    else
+        dd:EnableMouse(true)
+        dd:SetScript("OnEnter", function()
+            ShowPolicyTooltip(dd, dd._echoName)
+        end)
+        dd:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+    return dd
 end
 
 local function AnchorScoreColumn(label, row)
@@ -506,12 +768,27 @@ local function AnchorScoreColumn(label, row)
     end
 end
 
-local function CreatePolicyDropdown(row)
-    return nil
+local function CreatePolicyHolder(row)
+    local holder = CreateFrame("Frame", nil, row)
+    holder:SetHeight(ROW_HEIGHT)
+    if holder.SetClipsChildren then
+        holder:SetClipsChildren(true)
+    end
+    C.AnchorBoundedColumn(holder, row, C.GetPolicyRightInset(), COL_POLICY)
+    local dd = EbonBuilds.EchoTableRows.CreatePolicyDropdown(holder, {
+        anchorFn = function(dd, parent)
+            dd:ClearAllPoints()
+            dd:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, 0)
+            dd:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 0, 0)
+        end,
+        width = COL_POLICY - 8,
+    })
+    return dd, holder
 end
 
-local function CreateTomeOwnedDisplay(row)
-    return EbonBuilds.EchoTableRows.CreateTomeOwnedDisplay(row)
+local function CreatePolicyDropdown(row)
+    local dd = CreatePolicyHolder(row)
+    return dd
 end
 
 function EbonBuilds.EchoTableRows.SyncTomeOwnedDisplay(frame, arg)
@@ -609,6 +886,10 @@ function EbonBuilds.EchoTableRows.CreateTomeOwnedDisplay(row, opts)
     frame:SetScript("OnLeave", function() GameTooltip:Hide() end)
     frame:Hide()
     return frame
+end
+
+local function CreateTomeOwnedDisplay(row)
+    return EbonBuilds.EchoTableRows.CreateTomeOwnedDisplay(row)
 end
 
 -- Tooltip helpers -------------------------------------------------------

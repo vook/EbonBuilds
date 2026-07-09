@@ -7,6 +7,8 @@
 core/Init.lua
 modules/build/Build.lua
 modules/data/SpecData.lua
+modules/data/EchoLocations.lua
+modules/data/EchoOwnership.lua
 modules/weights/Weights.lua
 modules/ui/MinimapButton.lua
 modules/ui/MainWindow.lua
@@ -16,6 +18,7 @@ modules/ui/EchoPicker.lua
 modules/ui/BuildWizard.lua
 modules/ui/BuildForm.lua
 modules/ui/ScrollWheel.lua
+modules/ui/EchoSearch.lua
 modules/ui/Filters.lua
 modules/ui/EchoTableColumns.lua
 modules/ui/EchoTableRows.lua

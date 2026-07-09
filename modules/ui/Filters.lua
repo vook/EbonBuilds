@@ -54,6 +54,98 @@ local function MatchesFamilies(entry)
     return true
 end
 
+local TRI_STATE_CYCLE = { "off", "only", "exclude" }
+
+local function EntryQualityCount(entry)
+    if not entry or not entry.qualities then return 0 end
+    return EbonBuilds.EchoTableRows.CountQualities
+        and EbonBuilds.EchoTableRows.CountQualities(entry.qualities) or 0
+end
+
+function EbonBuilds.Filters.CycleTriStateFilter(mode)
+    local current = mode or "off"
+    for i, value in ipairs(TRI_STATE_CYCLE) do
+        if value == current then
+            local nextValue = TRI_STATE_CYCLE[(i % #TRI_STATE_CYCLE) + 1]
+            return nextValue == "off" and nil or nextValue
+        end
+    end
+    return nil
+end
+
+function EbonBuilds.Filters.PassesRequiresTomeFilter(entry, mode)
+    if not mode then return true end
+    if mode == "only" then return entry.requiresTome == true end
+    if mode == "exclude" then return not entry.requiresTome end
+    return true
+end
+
+function EbonBuilds.Filters.SyncRequiresTomeFilterUI(cb, label, mode)
+    if not cb or not cb._checkTex then return end
+    if mode == "only" then
+        cb._checkTex:Show()
+        cb._checkTex:SetVertexColor(1.0, 0.82, 0.0, 1)
+        if label then
+            label:SetText("Requires Tome")
+            label:SetTextColor(1.0, 0.82, 0.0)
+        end
+    elseif mode == "exclude" then
+        cb._checkTex:Show()
+        cb._checkTex:SetVertexColor(1.0, 0.55, 0.2, 1)
+        if label then
+            label:SetText("Does Not Require Tome")
+            label:SetTextColor(1.0, 0.55, 0.2)
+        end
+    else
+        cb._checkTex:Hide()
+        if label then
+            label:SetText("Requires Tome")
+            label:SetTextColor(0.8, 0.8, 0.8)
+        end
+    end
+end
+
+function EbonBuilds.Filters.PassesMultipleRanksFilter(entry, mode)
+    if not mode then return true end
+    local isMulti = EntryQualityCount(entry) >= 2
+    if mode == "only" then return isMulti end
+    if mode == "exclude" then return not isMulti end
+    return true
+end
+
+function EbonBuilds.Filters.CycleMultipleRanksFilter(mode)
+    return EbonBuilds.Filters.CycleTriStateFilter(mode)
+end
+
+function EbonBuilds.Filters.CycleRequiresTomeFilter(mode)
+    return EbonBuilds.Filters.CycleTriStateFilter(mode)
+end
+
+function EbonBuilds.Filters.SyncMultiRankFilterUI(cb, label, mode)
+    if not cb or not cb._checkTex then return end
+    if mode == "only" then
+        cb._checkTex:Show()
+        cb._checkTex:SetVertexColor(0.6, 0.8, 1.0, 1)
+        if label then
+            label:SetText("Multi-Rank")
+            label:SetTextColor(0.6, 0.8, 1.0)
+        end
+    elseif mode == "exclude" then
+        cb._checkTex:Show()
+        cb._checkTex:SetVertexColor(1.0, 0.55, 0.2, 1)
+        if label then
+            label:SetText("Exclude Multi-Rank")
+            label:SetTextColor(1.0, 0.55, 0.2)
+        end
+    else
+        cb._checkTex:Hide()
+        if label then
+            label:SetText("Multi-Rank")
+            label:SetTextColor(0.8, 0.8, 0.8)
+        end
+    end
+end
+
 local function PassesFilters(entry, famActive)
     if state.text ~= "" then
         if not entry.name:lower():find(state.text, 1, true) then return false end
