@@ -401,7 +401,8 @@ local function BuildOverviewTab(parent)
     outer._lockedHeader = lockedHeader
 
     local lockedButtons = {}
-    for i = 1, 5 do
+    local maxSlots = (EbonBuilds.Build and EbonBuilds.Build.MAX_LOCKED_SLOTS) or 6
+    for i = 1, maxSlots do
         local btn = CreateIconButton(outer, 36)
         btn:SetPoint("TOPLEFT", lockedHeader, "BOTTOMLEFT", (i - 1) * 42, -6)
         local border = btn:CreateTexture(nil, "BORDER")
@@ -1269,13 +1270,21 @@ local function RefreshOverview()
     overviewDescSmf:AddMessage(desc, 0.8, 0.8, 0.8, 1.0)
     overviewDescMeasure:SetText(desc)
 
-    for i = 1, 5 do
+    local slotCount = (EbonBuilds.Build and EbonBuilds.Build.GetLockedSlotCount and EbonBuilds.Build.GetLockedSlotCount()) or 5
+    for i = 1, #overviewOuter._lockedButtons do
         local btn = overviewOuter._lockedButtons[i]
+        if i > slotCount then
+            btn._icon:SetTexture("Interface\\Buttons\\UI-EmptySlot")
+            btn._spellId = nil
+            btn._border:Hide()
+            btn:Hide()
+        else
+            btn:Show()
+        end
         local spellId = build.lockedEchoes and build.lockedEchoes[i]
         if spellId then
             btn._icon:SetTexture(select(3, GetSpellInfo(spellId)))
             btn._spellId = spellId
-            btn:Show()
             local data = ProjectEbonhold.PerkDatabase[spellId]
             local quality = data and data.quality or 0
             local bc = QUALITY_BORDER_COLORS[quality] or QUALITY_BORDER_COLORS[0]
@@ -1285,7 +1294,6 @@ local function RefreshOverview()
             btn._icon:SetTexture("Interface\\Buttons\\UI-EmptySlot")
             btn._spellId = nil
             btn._border:Hide()
-            btn:Show()
         end
     end
 

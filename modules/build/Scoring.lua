@@ -257,14 +257,14 @@ function EbonBuilds.Scoring.GetEffectiveLockedEchoes()
     end
     local build = EbonBuilds.Build.GetActive()
     if build and build.lockedEchoes then return build.lockedEchoes end
-    return { nil, nil, nil, nil, nil }
+    return EbonBuilds.Build.NormalizeLockedEchoes()
 end
 
 function EbonBuilds.Scoring.IsLocked(spellId)
     if not spellId then return false end
     local lockeds = EbonBuilds.Scoring.GetEffectiveLockedEchoes()
     if not lockeds then return false end
-    for i = 1, EbonBuilds.Build.LOCKED_SLOTS do
+    for i = 1, EbonBuilds.Build.GetLockedSlotCount() do
         if lockeds[i] and lockeds[i] == spellId then
             return true
         end

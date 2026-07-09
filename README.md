@@ -48,6 +48,8 @@ When echoes are offered during a run, the automation engine evaluates every choi
 
 A toast notification appears after each automated action showing the three offered echoes, the target highlighted, and your remaining charges.
 
+> **Stability note:** EbonBuilds does not register native perk server event handlers via `onEventReceived` for echo choice flow. ProjectEbonhold keeps one handler per event id, so overriding those handlers can break native `/echoes` UI state and manual pick interactions.
+
 ---
 
 ## Build List & Overview
@@ -55,6 +57,8 @@ A toast notification appears after each automated action showing the three offer
 The **left panel** lists all your builds â€” created or imported. Click any build to load it; the active build is the one driving automation. You can toggle automation on or off per build directly from the overview.
 
 Clicking a build opens the **Overview** tab with class, spec, author, last modified, locked echoes, and the automation toggle. Five additional sub-tabs are available:
+
+Locked echoes support up to **6 slots**. EbonBuilds detects available slots from ProjectEbonhold runtime data when possible and keeps a safe 6-slot fallback for unlocked clients.
 
 **Stats** â€” echoes seen, runs completed, picks, rerolls/banishes/freezes used, quality distribution, and the most picked and banned echoes. 
 

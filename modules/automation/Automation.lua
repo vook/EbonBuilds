@@ -993,90 +993,9 @@ function EbonBuilds.Automation.Init()
         end)
     end
 
-    if ProjectEbonhold.onEventReceived and ProjectEbonhold.SS then
-        local ss = ProjectEbonhold.SS
-
-        if ss.SEND_PLAYER_PERK_CHOICE then
-            ProjectEbonhold.onEventReceived(ss.SEND_PLAYER_PERK_CHOICE, function(body)
-                if not body or body == "" then
-                    ResetAutomationRound({ clearDebounce = true })
-                else
-                    ResetAutomationRound({ clearDebounce = true })
-                end
-            end)
-        end
-
-        if ss.SEND_BANISH_REPLACEMENT_PERK then
-            ProjectEbonhold.onEventReceived(ss.SEND_BANISH_REPLACEMENT_PERK, function(body)
-                if not EbonBuilds.Automation.IsEnabled() then return end
-                if not body or body == "" or body == "0" then return end
-                if not ProjectEbonhold.PerkService.GetCurrentChoice() then return end
-                pendingWaitCount = 0
-                local current = ProjectEbonhold.PerkService.GetCurrentChoice()
-                if current then
-                    ScheduleAutomation(current, { bypassDebounce = true, keepPending = true })
-                end
-            end)
-        end
-
-        if ss.SEND_FREEZE_PERK_RESULT then
-            ProjectEbonhold.onEventReceived(ss.SEND_FREEZE_PERK_RESULT, function(body)
-                if not EbonBuilds.Automation.IsEnabled() then return end
-                if not ProjectEbonhold.PerkService.GetCurrentChoice() then return end
-
-                local inAutoFreezeRound = next(locallyFrozenIndices) ~= nil
-                if body == "1" then
-                    local current = ProjectEbonhold.PerkService.GetCurrentChoice()
-                    if current then
-                        for i, choice in ipairs(current) do
-                            if choice.justFrozen or locallyFrozenIndices[i] then
-                                choice.isFrozen = true
-                            end
-                        end
-                    end
-                    if inAutoFreezeRound then
-                        freezeRoundActive = true
-                    end
-                    pendingWaitCount = 0
-                    if inAutoFreezeRound and not HasPendingPerkAction(false) then
-                        local result = RunEvaluate()
-                        if result == true or result == "wait" then
-                            return
-                        end
-                        UnblockPerkInteraction()
-                        return
-                    end
-                else
-                    ResetAutomationRound()
-                end
-                pendingWaitCount = 0
-                local current = ProjectEbonhold.PerkService.GetCurrentChoice()
-                if current then
-                    ScheduleAutomation(current, {
-                        keepFreezeRound = (body == "1" and inAutoFreezeRound),
-                        keepPending = true,
-                    })
-                end
-            end)
-        end
-
-        if ss.SEND_PLAYER_PERK_SELECTION_RESULT then
-            ProjectEbonhold.onEventReceived(ss.SEND_PLAYER_PERK_SELECTION_RESULT, function(body)
-                if body >= "1" then
-                    ResetAutomationRound({ clearDebounce = true })
-                    return
-                end
-                if body ~= "0" then return end
-                if not EbonBuilds.Automation.IsEnabled() then return end
-                if not ProjectEbonhold.PerkService.GetCurrentChoice() then return end
-                pendingWaitCount = 0
-                if RunEvaluate() == true then
-                    return
-                end
-                UnblockPerkInteraction()
-            end)
-        end
-    end
+    -- IMPORTANT: Do not register onEventReceived handlers for perk events here.
+    -- ProjectEbonhold stores one handler per event id; overriding these breaks
+    -- native echo UI state/interaction. Automation relies on PerkUI hooks instead.
 
     hooksInstalled = true
     return true

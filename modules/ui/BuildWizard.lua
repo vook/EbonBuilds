@@ -36,11 +36,14 @@ local stepLabel, backBtn, nextBtn
 
 local state = {}
 local echoListCache = {}
+local function LockedSlotCount()
+    return (EbonBuilds.Build and EbonBuilds.Build.GetLockedSlotCount and EbonBuilds.Build.GetLockedSlotCount()) or 5
+end
 
 local function BuildFilteredEchoList()
     local best = EbonBuilds.EchoTableRows.BuildBestByName()
     local lockedSet = {}
-    for i = 1, 5 do
+    for i = 1, LockedSlotCount() do
         if state.locked[i] then
             local n = GetSpellInfo(state.locked[i])
             if n then lockedSet[n] = true end
@@ -104,7 +107,7 @@ local function ClearContent()
 end
 
 local function HasAdaptivePower()
-    for i = 1, 5 do
+    for i = 1, LockedSlotCount() do
         local id = state.locked[i]
         if id then
             local name = GetSpellInfo(id)
@@ -166,14 +169,15 @@ local function RenderStep1()
 
     local title = contentArea:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     title:SetPoint("TOP", contentArea, "TOP", 0, -20)
-    title:SetText("Select your 5 locked echoes")
+    title:SetText("Select your locked echoes")
 
     local slotSize = 48
     local spacing  = 10
-    local totalW   = 5 * slotSize + 4 * spacing
+    local slotCount = LockedSlotCount()
+    local totalW   = slotCount * slotSize + (slotCount - 1) * spacing
     local startX   = -math.floor(totalW / 2)
 
-    for i = 1, 5 do
+    for i = 1, slotCount do
         local btn = CreateIconButton(contentArea, slotSize)
         btn:SetPoint("TOP", contentArea, "TOP", startX + (i - 1) * (slotSize + spacing), -90)
         btn._icon:SetTexture("Interface\\Buttons\\UI-EmptySlot")
@@ -771,7 +775,7 @@ local function CreateBuildFromWizard()
     end
 
     -- Locked echoes
-    local locked = { state.locked[1], state.locked[2], state.locked[3], state.locked[4], state.locked[5] }
+    local locked = EbonBuilds.Build.NormalizeLockedEchoes(state.locked)
 
     local playerClass = EbonBuilds.Build.PlayerClassToken()
 
@@ -914,7 +918,7 @@ function view.Show(container, context)
 
     -- Reset state
     state.step = 0
-    state.locked = { nil, nil, nil, nil, nil }
+    state.locked = EbonBuilds.Build.NormalizeLockedEchoes()
     state.noveltyValue = 30
     state.qualityBonus = { [0] = 0, [1] = 10, [2] = 20, [3] = 30, [4] = 40 }
     state.familyPriorities = {}
