@@ -23,11 +23,16 @@ _G.EbonholdPlayerRunData = {
     remainingBanishes = 3,
 }
 
+_G.ProjectEbonholdDB = _G.ProjectEbonholdDB or {
+    echoDiscovery = {},
+    cachedPerkCounts = {},
+}
+
 -- Mock ProjectEbonhold namespace
 _G.ProjectEbonhold = {
     PerkService = {
         GetGrantedPerks = function()
-            return _G.MOCK_GRANTED_PERKS or {}
+            return _G.MOCK_GRANTED_PERKS
         end,
         GetLockedPerks = function()
             return _G.MOCK_LOCKED_PERKS or {}
@@ -56,9 +61,19 @@ _G.ProjectEbonhold = {
     PerkDatabase = _G.MOCK_PERK_DATABASE or {},
     PerkDropSources = _G.MOCK_PERK_DROP_SOURCES or {},
     PerkDropSourceByGroup = _G.MOCK_PERK_DROP_SOURCE_BY_GROUP or {},
+    GetPerkData = function(spellId)
+        local db = _G.MOCK_PERK_DATABASE or {}
+        return db[spellId]
+    end,
     Constants = {
         ENABLE_BANISH_SYSTEM = true,
     },
+    SS = {
+        SEND_PLAYER_PERK_GRANTED = 9001,
+    },
+    onEventReceived = function(_, cb)
+        _G.MOCK_ON_EVENT_CB = cb
+    end,
 }
 
 -- Stub EbonBuilds modules that Automation depends on

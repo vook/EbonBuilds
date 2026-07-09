@@ -41,6 +41,9 @@ local function OnAddonLoaded(addonName)
     EbonBuilds.MainWindow.Init()
     EbonBuilds.Automation.Init()
     EbonBuilds.Sync.Init()
+    if EbonBuilds.EchoSearch and EbonBuilds.EchoSearch.StartPrewarm then
+        C_Timer.After(1, EbonBuilds.EchoSearch.StartPrewarm)
+    end
 end
 
 eventFrame:RegisterEvent("ADDON_LOADED")
