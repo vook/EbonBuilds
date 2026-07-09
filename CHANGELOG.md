@@ -25,3 +25,8 @@ All notable changes to EbonBuilds are documented in this file.
 
 ### Policies overview tab
 - Dedicated **Policies** tab lists echoes with non-default policies for quick review and edits.
+
+### Echoes overview tab (Collection)
+- Overview dashboard tab **Collection** (formerly Missing) with rolled, tome, source, base weight, and score columns.
+- Drop sources resolved via echo location data; tri-state filters for tome requirement, multi-rank, and all classes.
+- Live refresh when perks are granted.
