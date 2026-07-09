@@ -40,9 +40,6 @@ function EbonBuilds.EchoOwnership.Invalidate()
     discoveryCache = nil
     countsCache = nil
     groupDiscoveryCache = nil
-    if EbonBuilds.EchoTableRows and EbonBuilds.EchoTableRows.InvalidateTomeCache then
-        EbonBuilds.EchoTableRows.InvalidateTomeCache()
-    end
 end
 
 function EbonBuilds.EchoOwnership.GetPerkDatabase()

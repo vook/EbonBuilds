@@ -158,37 +158,13 @@ end
 function EbonBuilds.EchoTableRows.InvalidateCaches()
     bestByNameCache = nil
     sortedListCache = nil
-    EbonBuilds.EchoTableRows.InvalidateTomeCache()
     if EbonBuilds.EchoSearch and EbonBuilds.EchoSearch.InvalidateCache then
         EbonBuilds.EchoSearch.InvalidateCache()
     end
 end
 
-local tomeKnownCache = {}
-
+-- Legacy no-op: echoes are no longer tracked via spellbook tomes.
 function EbonBuilds.EchoTableRows.InvalidateTomeCache()
-    tomeKnownCache = {}
-    if EbonBuilds.Scoring and EbonBuilds.Scoring.ResetCache then
-        EbonBuilds.Scoring.ResetCache()
-    end
-end
-
-function EbonBuilds.EchoTableRows.IsTomeInSpellbook(tomeSpellId)
-    if not tomeSpellId or tomeSpellId == 0 or tomeSpellId == 9 then
-        return false
-    end
-    if tomeKnownCache[tomeSpellId] ~= nil then
-        return tomeKnownCache[tomeSpellId]
-    end
-    local known = false
-    if IsSpellKnown then
-        local ok, result = pcall(IsSpellKnown, tomeSpellId)
-        if ok and result then
-            known = true
-        end
-    end
-    tomeKnownCache[tomeSpellId] = known
-    return known
 end
 
 -- Missing targets: echoes that need a tome count only when that echo is account-owned.
@@ -199,9 +175,7 @@ function EbonBuilds.EchoTableRows.IsEchoTomeOwnedForRun(name)
     if EbonBuilds.EchoOwnership then
         return EbonBuilds.EchoOwnership.IsEchoRollable(name, entry.tomeSpellId)
     end
-    local tomeId = entry.tomeSpellId
-    if not tomeId or tomeId == 0 or tomeId == 9 then return false end
-    return EbonBuilds.EchoTableRows.IsTomeInSpellbook(tomeId)
+    return false
 end
 
 function EbonBuilds.EchoTableRows.ResolveSpellId(name, quality)
@@ -822,7 +796,7 @@ function EbonBuilds.EchoTableRows.SyncTomeOwnedDisplay(frame, arg)
     if owned == nil and EbonBuilds.EchoOwnership then
         owned = EbonBuilds.EchoOwnership.IsAccountOwned(name, spellIds, groupId, spellId)
     elseif owned == nil then
-        owned = EbonBuilds.EchoTableRows.IsTomeInSpellbook(tomeSpellId)
+        owned = false
     end
     frame._owned = owned
 
@@ -874,7 +848,7 @@ function EbonBuilds.EchoTableRows.CreateTomeOwnedDisplay(row, opts)
             owned = EbonBuilds.EchoOwnership.IsAccountOwned(
                 self._echoName, self._echoSpellIds, self._echoGroupId, self._echoSpellId)
         elseif owned == nil then
-            owned = EbonBuilds.EchoTableRows.IsTomeInSpellbook(self._tomeSpellId)
+            owned = false
         end
         if owned then
             GameTooltip:AddLine("Discovered on this account.", 0.5, 1, 0.5, true)

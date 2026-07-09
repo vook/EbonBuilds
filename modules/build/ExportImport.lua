@@ -218,7 +218,7 @@ local function BuildExportData(build)
 		class = build.class,
 		spec = build.spec,
 		comments = build.comments,
-		lockedEchoes = build.lockedEchoes or { nil, nil, nil, nil, nil },
+		lockedEchoes = EbonBuilds.Build.NormalizeLockedEchoes(build.lockedEchoes),
 		echoWeights = filteredWeights,
 		scannedAffixes = build.scannedAffixes,
 		settings = build.settings,
@@ -245,8 +245,7 @@ function EbonBuilds.ExportImport.DecodeBuild(b64String)
 	local data = EbonBuilds.ExportImport.JSONDecode(json)
 	if not data or type(data) ~= "table" then return nil end
 
-	local locked = data.lockedEchoes or {}
-	for i = 1, EbonBuilds.Build.LOCKED_SLOTS do locked[i] = locked[i] or nil end
+	local locked = EbonBuilds.Build.NormalizeLockedEchoes(data.lockedEchoes)
 
 	local echoWeights = nil
 	if data.echoWeights and next(data.echoWeights) then

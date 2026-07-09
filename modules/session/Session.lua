@@ -53,6 +53,10 @@ local function CreateSession()
     EbonBuildsDB.currentSessionIndex = 1
     maxLevel = UnitLevel("player")
 
+    if EbonBuilds.Automation and EbonBuilds.Automation.ResetRunState then
+        EbonBuilds.Automation.ResetRunState()
+    end
+
     -- Shift existing indices since we inserted at position 1
     for i = 2, #sessions do
         -- indices are relative to array position; no reindex needed since

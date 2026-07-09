@@ -126,7 +126,8 @@ local function CreateRow(parent)
 
     -- Locked echo icon buttons (22x22, bottom row)
     row._lockedBtns = {}
-    for i = 1, 5 do
+    local maxSlots = (EbonBuilds.Build and EbonBuilds.Build.MAX_LOCKED_SLOTS) or 6
+    for i = 1, maxSlots do
         local btn = CreateIconButton(row, 22)
         btn:Hide()
         row._lockedBtns[i] = btn
@@ -213,8 +214,15 @@ local function PopulateRow(row, build, activeId, yOffset)
 
     -- Locked echo icons
     local lockeds = build.lockedEchoes
-    for i = 1, 5 do
+    local slotCount = (EbonBuilds.Build and EbonBuilds.Build.GetLockedSlotCount and EbonBuilds.Build.GetLockedSlotCount()) or 5
+    for i = 1, #row._lockedBtns do
         local btn = row._lockedBtns[i]
+        if i > slotCount then
+            btn:Hide()
+            btn._spellId = nil
+        else
+            btn:Show()
+        end
         local spellId = lockeds and lockeds[i]
         btn:ClearAllPoints()
         btn:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", LOCKED_X_START + (i - 1) * LOCKED_STEP, 4)

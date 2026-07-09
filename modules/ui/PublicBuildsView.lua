@@ -233,7 +233,8 @@ local function CreateCard(parent)
 
     -- Locked echo icons (below meta)
     card._lockedBtns = {}
-    for i = 1, 5 do
+    local maxSlots = (EbonBuilds.Build and EbonBuilds.Build.MAX_LOCKED_SLOTS) or 6
+    for i = 1, maxSlots do
         local btn = CreateIconButton(card, LOCKED_ICON_SIZE)
         btn:SetPoint("TOPLEFT", meta, "BOTTOMLEFT", (i - 1) * (LOCKED_ICON_SIZE + 4), -4)
         btn:Hide()
@@ -284,7 +285,7 @@ local function ImportBuild(build)
         class    = build.class,
         spec     = build.spec or 1,
         comments = build.comments or "",
-        lockedEchoes = build.lockedEchoes or { nil, nil, nil, nil, nil },
+        lockedEchoes = EbonBuilds.Build.NormalizeLockedEchoes(build.lockedEchoes),
         settings = settings,
         isPublic = false,
     }
@@ -353,8 +354,15 @@ local function PopulateCard(card, build)
 
     -- Locked echo icons
     local lockeds = build.lockedEchoes
-    for i = 1, 5 do
+    local slotCount = (EbonBuilds.Build and EbonBuilds.Build.GetLockedSlotCount and EbonBuilds.Build.GetLockedSlotCount()) or 5
+    for i = 1, #card._lockedBtns do
         local btn = card._lockedBtns[i]
+        if i > slotCount then
+            btn:Hide()
+            btn._spellId = nil
+        else
+            btn:Show()
+        end
         local spellId = lockeds and lockeds[i]
         if spellId then
             btn._icon:SetTexture(select(3, GetSpellInfo(spellId)))
@@ -566,6 +574,7 @@ local function BuildViewFrame(parent)
         EbonBuilds.Sync.RequestSync()
     end)
     refreshBtn:SetScript("OnUpdate", function()
+        if not f:IsVisible() then return end
         local remaining = EbonBuilds.Sync.GetCooldownRemaining()
         if remaining > 0 then
             refreshBtn:Disable()

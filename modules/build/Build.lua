@@ -4,7 +4,88 @@
 
 EbonBuilds.Build = {}
 
-EbonBuilds.Build.LOCKED_SLOTS = 5
+EbonBuilds.Build.DEFAULT_LOCKED_SLOTS = 5
+EbonBuilds.Build.MAX_LOCKED_SLOTS = 6
+EbonBuilds.Build.FALLBACK_LOCKED_SLOTS = 6
+EbonBuilds.Build.LOCKED_SLOTS = EbonBuilds.Build.DEFAULT_LOCKED_SLOTS
+
+local LOCKED_SLOT_CANDIDATE_KEYS = {
+    "lockedPerkSlots",
+    "lockedEchoSlots",
+    "maxLockedPerks",
+    "maxLockedEchoes",
+    "maxPerkLocks",
+    "perkLockSlots",
+    "echoLockSlots",
+}
+local lockedSlotCache = { value = nil, at = 0 }
+
+local function ClampLockedSlotCount(value)
+    local n = tonumber(value)
+    if not n then return nil end
+    n = math.floor(n + 0.5)
+    if n < 5 then
+        return 5
+    end
+    if n > EbonBuilds.Build.MAX_LOCKED_SLOTS then
+        return EbonBuilds.Build.MAX_LOCKED_SLOTS
+    end
+    return n
+end
+
+local function ReadLockedSlotCountFromTable(tbl)
+    if type(tbl) ~= "table" then return nil end
+    for i = 1, #LOCKED_SLOT_CANDIDATE_KEYS do
+        local key = LOCKED_SLOT_CANDIDATE_KEYS[i]
+        local clamped = ClampLockedSlotCount(tbl[key])
+        if clamped then return clamped end
+    end
+    return nil
+end
+
+local function DetectLockedSlotCount()
+    local pe = ProjectEbonhold
+    local perkUI = pe and pe.PerkUI
+    local safeCandidates = {
+        ReadLockedSlotCountFromTable(pe),
+        ReadLockedSlotCountFromTable(perkUI),
+        ReadLockedSlotCountFromTable(pe and pe.Constants),
+        ReadLockedSlotCountFromTable(ProjectEbonholdDB and ProjectEbonholdDB.settings),
+    }
+    for i = 1, #safeCandidates do
+        if safeCandidates[i] == 6 then return 6 end
+    end
+
+    -- Keep gameplay stable: do not call runtime API methods here.
+    -- If no explicit 6 is visible in safe tables, prefer 6 for unlocked clients.
+    return ClampLockedSlotCount(EbonBuilds.Build.FALLBACK_LOCKED_SLOTS)
+end
+
+function EbonBuilds.Build.GetLockedSlotCount()
+    local now = GetTime and GetTime() or 0
+    if lockedSlotCache.value and now > 0 and (now - (lockedSlotCache.at or 0)) < 2 then
+        return lockedSlotCache.value
+    end
+    local count = DetectLockedSlotCount()
+    lockedSlotCache.value = count
+    lockedSlotCache.at = now
+    EbonBuilds.Build.LOCKED_SLOTS = count
+    return count
+end
+
+function EbonBuilds.Build.InvalidateLockedSlotCache()
+    lockedSlotCache.value = nil
+    lockedSlotCache.at = 0
+end
+
+function EbonBuilds.Build.NormalizeLockedEchoes(list)
+    local out = {}
+    local src = type(list) == "table" and list or {}
+    for i = 1, EbonBuilds.Build.MAX_LOCKED_SLOTS do
+        out[i] = src[i] or nil
+    end
+    return out
+end
 
 local function DefaultSettings()
     return {
@@ -117,7 +198,7 @@ function EbonBuilds.Build.Checksum(build)
         build.comments or "",
     }
     local le = build.lockedEchoes or {}
-    for i = 1, EbonBuilds.Build.LOCKED_SLOTS do
+    for i = 1, EbonBuilds.Build.GetLockedSlotCount() do
         parts[#parts + 1] = tostring(le[i] or "nil")
     end
     if build.echoWeights then
@@ -322,7 +403,7 @@ function EbonBuilds.Build.Migrate()
             class           = PlayerClassToken(),
             spec            = PlayerTopTalentTab(),
             comments        = "",
-            lockedEchoes = { nil, nil, nil, nil, nil },
+            lockedEchoes = EbonBuilds.Build.NormalizeLockedEchoes(),
             echoWeights     = legacy,
             settings        = DefaultSettings(),
             version         = 1,
@@ -723,7 +804,7 @@ function EbonBuilds.Build.NewObject(data)
         class           = data.class or PlayerClassToken(),
         spec            = data.spec or PlayerTopTalentTab(),
         comments        = data.comments or "",
-        lockedEchoes = data.lockedEchoes or { nil, nil, nil, nil, nil },
+        lockedEchoes = EbonBuilds.Build.NormalizeLockedEchoes(data.lockedEchoes),
         echoWeights     = data.echoWeights or {},
         scannedAffixes  = data.scannedAffixes,
         settings        = data.settings or DefaultSettings(),
@@ -766,8 +847,8 @@ function EbonBuilds.Build.UpdateFromPublic(localBuild, publicBuild)
     localBuild.class            = publicBuild.class            or localBuild.class
     localBuild.spec             = publicBuild.spec             or localBuild.spec
     localBuild.comments         = publicBuild.comments         or localBuild.comments
-    localBuild.lockedEchoes     = { nil, nil, nil, nil, nil }
-    for i = 1, EbonBuilds.Build.LOCKED_SLOTS do
+    localBuild.lockedEchoes = EbonBuilds.Build.NormalizeLockedEchoes()
+    for i = 1, EbonBuilds.Build.GetLockedSlotCount() do
         localBuild.lockedEchoes[i] = (publicBuild.lockedEchoes and publicBuild.lockedEchoes[i]) or nil
     end
     if publicBuild.settings then
