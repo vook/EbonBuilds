@@ -3,6 +3,18 @@
 
 EbonBuilds = EbonBuilds or {}
 
+function EbonBuilds.OpenEchoJournal()
+    local msg = "/echoes"
+    if ChatFrame_OpenChat then
+        ChatFrame_OpenChat(msg)
+    end
+    local editBox = DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.editBox
+    if editBox and ChatEdit_SendText then
+        editBox:SetText(msg)
+        ChatEdit_SendText(editBox)
+    end
+end
+
 local eventFrame = CreateFrame("Frame")
 
 local function OnAddonLoaded(addonName)
@@ -47,6 +59,9 @@ local function OnAddonLoaded(addonName)
     EbonBuilds.MainWindow.Init()
     EbonBuilds.Automation.Init()
     EbonBuilds.Sync.Init()
+    if EbonBuilds.EchoOwnership and EbonBuilds.EchoOwnership.Init then
+        EbonBuilds.EchoOwnership.Init()
+    end
     if EbonBuilds.EchoSearch and EbonBuilds.EchoSearch.StartPrewarm then
         C_Timer.After(1, EbonBuilds.EchoSearch.StartPrewarm)
     end
