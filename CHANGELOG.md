@@ -67,3 +67,7 @@ All notable changes to EbonBuilds are documented in this file.
 - Source filter supports **All Open World**, **All Raids**, **No Tome Required**, **Unknown Source** (tomes with no resolved drop location), and **Clear all filters**.
 - Source filter selections reset on `/reload` and relog (not saved across sessions).
 - Icecrown Citadel echoes classify from native `PerkDropSources` text when not yet present on the community map.
+
+### Logbook copy report
+- Logbook **Export** exports the selected session's action log plus a run-start snapshot of peak score and all five automation thresholds (with absolute score cutoffs).
+- Automation settings are stored per session for accurate auditing; older sessions without a snapshot show a best-effort fallback from the active build.

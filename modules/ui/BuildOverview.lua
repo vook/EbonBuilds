@@ -1897,6 +1897,9 @@ local function BuildViewFrame()
         logbookParent:Hide()
         affixParent:Hide()
         EbonBuilds.AffixView.Unmount()
+        if EbonBuilds.SessionHistory and EbonBuilds.SessionHistory.HideCopyDialog then
+            EbonBuilds.SessionHistory.HideCopyDialog()
+        end
     end
 
     -- Tab switching functions (defined after content so refs are valid)
