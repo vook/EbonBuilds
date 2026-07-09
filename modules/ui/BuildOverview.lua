@@ -312,6 +312,9 @@ local function ComputeMissingEchoes(build, opts)
     local missing = {}
     for key, entry in pairs(byName) do
         local source = ResolveMissingDropSource(entry.spellId, entry.data)
+        local sourceMeta = EbonBuilds.EchoSources
+            and EbonBuilds.EchoSources.Classify(entry.data.groupId, source)
+            or nil
         if not banList[entry.spellId] then
             -- Build scoring entry
             local scoringEntry = {
@@ -331,6 +334,7 @@ local function ComputeMissingEchoes(build, opts)
                 qualities = entry.qualities,
                 groupId = entry.data.groupId,
                 dropSource = source,
+                sourceMeta = sourceMeta,
                 isLocked = lockedLower[key] or false,
                 rolled = EbonBuilds.EchoOwnership
                     and EbonBuilds.EchoOwnership.IsRolledThisRun(
@@ -693,6 +697,7 @@ local missingSearchText = ""
 local missingRequiresTomeFilter = nil
 local missingMultipleRanksFilter = nil
 local missingShowAllClasses = false
+local missingSourceFilter = {}
 local missingTomeFilterCb
 local missingTomeFilterLabel
 local missingMultiRankFilterCb
@@ -719,6 +724,10 @@ local function LoadMissingFilterPrefs()
             missingMultipleRanksFilter = gs.missingMultipleRanks
         end
     end
+    missingSourceFilter = {}
+    if gs and gs.missingSourceFilter ~= nil then
+        gs.missingSourceFilter = nil
+    end
 end
 
 local function PersistMissingFilterPrefs()
@@ -726,6 +735,9 @@ local function PersistMissingFilterPrefs()
     EbonBuildsDB.globalSettings = EbonBuildsDB.globalSettings or {}
     EbonBuildsDB.globalSettings.missingRequiresTome = missingRequiresTomeFilter
     EbonBuildsDB.globalSettings.missingMultipleRanks = missingMultipleRanksFilter
+    if EbonBuildsDB.globalSettings.missingSourceFilter ~= nil then
+        EbonBuildsDB.globalSettings.missingSourceFilter = nil
+    end
 end
 
 local function SyncMissingTomeFilterUI()
@@ -918,6 +930,88 @@ local function CreateMissingMultiRankCycleCheckbox(parent, anchorFrame, anchorPo
     missingMultiRankFilterCb = cb
     SyncMissingMultiRankFilterUI()
     return cb, cbLabel
+end
+
+local missingSourceDropdown
+
+local function SyncMissingSourceFilterUI()
+    if not missingSourceDropdown then return end
+    local label = EbonBuilds.EchoSources
+        and EbonBuilds.EchoSources.FilterLabel(missingSourceFilter)
+        or "All sources"
+    UIDropDownMenu_SetText(missingSourceDropdown, label)
+end
+
+local function CreateMissingSourceDropdown(parent)
+    local dropdown = CreateFrame("Frame", "EbonBuildsMissingSourceDD", parent, "UIDropDownMenuTemplate")
+    UIDropDownMenu_SetWidth(dropdown, 110)
+
+    local function UpdateLabel()
+        SyncMissingSourceFilterUI()
+    end
+
+    UIDropDownMenu_Initialize(dropdown, function(_, level)
+        local clearInfo = UIDropDownMenu_CreateInfo()
+        clearInfo.text = "Clear all filters"
+        clearInfo.notCheckable = true
+        clearInfo.func = function()
+            if EbonBuilds.EchoSources then
+                EbonBuilds.EchoSources.ClearSelection(missingSourceFilter)
+            else
+                for key in pairs(missingSourceFilter) do
+                    missingSourceFilter[key] = nil
+                end
+            end
+            UpdateLabel()
+            PersistMissingFilterPrefs()
+            RefreshMissing()
+        end
+        UIDropDownMenu_AddButton(clearInfo, level)
+
+        if not EbonBuilds.EchoSources or not EbonBuilds.EchoSources.FILTER_OPTIONS then return end
+        local options = EbonBuilds.EchoSources.FILTER_OPTIONS
+        local lastKind = nil
+        for i = 1, #options do
+            local opt = options[i]
+            if opt.kind ~= lastKind then
+                local header = UIDropDownMenu_CreateInfo()
+                header.isTitle = true
+                header.notCheckable = true
+                if opt.kind == "special" then
+                    header.text = "Other"
+                elseif opt.kind == "open_world" then
+                    header.text = "Open World"
+                elseif opt.kind == "raid" then
+                    header.text = "Raids"
+                else
+                    header.text = "Other"
+                end
+                UIDropDownMenu_AddButton(header, level)
+                lastKind = opt.kind
+            end
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = opt.label
+            info.isNotRadio = true
+            info.keepShownOnClick = true
+            info.arg1 = opt.key
+            info.checked = missingSourceFilter[opt.key] and true or false
+            info.func = function(_, key)
+                if missingSourceFilter[key] then
+                    missingSourceFilter[key] = nil
+                else
+                    missingSourceFilter[key] = true
+                end
+                UpdateLabel()
+                PersistMissingFilterPrefs()
+                RefreshMissing()
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end)
+
+    missingSourceDropdown = dropdown
+    UpdateLabel()
+    return dropdown
 end
 
 -- Echoes tab column layout (Echo | Source | Rolled | Tome | Base Weight | Score).
@@ -1140,6 +1234,10 @@ local function BuildMissingTab(parent)
     searchEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     searchEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
 
+    local sourceDropdown = CreateMissingSourceDropdown(headerRow)
+    sourceDropdown:SetPoint("TOPRIGHT", headerRow, "TOPRIGHT", 0, 0)
+    searchFrame:SetPoint("TOPRIGHT", sourceDropdown, "TOPLEFT", -8, 0)
+
     local filterRow = CreateFrame("Frame", nil, headerRow)
     filterRow:SetPoint("TOPLEFT", searchFrame, "BOTTOMLEFT", 0, -2)
     filterRow:SetPoint("TOPRIGHT", searchFrame, "BOTTOMRIGHT", 0, -2)
@@ -1174,6 +1272,7 @@ local function BuildMissingTab(parent)
     LoadMissingFilterPrefs()
     SyncMissingTomeFilterUI()
     SyncMissingMultiRankFilterUI()
+    SyncMissingSourceFilterUI()
 
     missingColumnHeader = CreateFrame("Frame", nil, parent)
     missingColumnHeader:SetPoint("TOPLEFT", headerRow, "BOTTOMLEFT", 0, -6)
@@ -1365,7 +1464,11 @@ RefreshMissing = function()
         local passesTome = EbonBuilds.Filters.PassesRequiresTomeFilter(entry, missingRequiresTomeFilter)
         local passesMultiRank = EbonBuilds.Filters.PassesMultipleRanksFilter(entry, missingMultipleRanksFilter)
         local passesSearch = EbonBuilds.EchoSearch.Matches(entry, missingSearchText)
-        if passesTome and passesMultiRank and passesSearch then
+        local passesSource = true
+        if EbonBuilds.EchoSources then
+            passesSource = EbonBuilds.EchoSources.PassesFilter(entry, missingSourceFilter)
+        end
+        if passesTome and passesMultiRank and passesSearch and passesSource then
             filtered[#filtered + 1] = entry
         end
     end
@@ -1373,7 +1476,9 @@ RefreshMissing = function()
     if #filtered == 0 then
         missingChild.noMatchLabel = missingChild.noMatchLabel or missingChild:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         missingChild.noMatchLabel:SetPoint("TOPLEFT", missingChild, "TOPLEFT", 4, -2)
-        if (missingSearchText ~= "" or missingRequiresTomeFilter or missingMultipleRanksFilter) and #missing > 0 then
+        if (missingSearchText ~= "" or missingRequiresTomeFilter or missingMultipleRanksFilter
+                or (EbonBuilds.EchoSources and EbonBuilds.EchoSources.CountSelected(missingSourceFilter) > 0))
+                and #missing > 0 then
             missingChild.noMatchLabel:SetText("No matches.")
         else
             missingChild.noMatchLabel:SetText("No echoes.")

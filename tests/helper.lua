@@ -35,6 +35,9 @@ if not _G.EbonBuilds.Weights then
 end
 
 -- 4. Load addon source modules in dependency order
+dofile(addonPath("modules/data/EchoLocations.lua"))
+dofile(addonPath("modules/data/EchoSourceMeta.lua"))
+dofile(addonPath("modules/data/EchoSources.lua"))
 dofile(addonPath("modules/data/EchoOwnership.lua"))
 dofile(addonPath("modules/build/Build.lua"))
 dofile(addonPath("modules/build/ExportImport.lua"))
