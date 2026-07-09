@@ -12,3 +12,7 @@ All notable changes to EbonBuilds are documented in this file.
 - Echo weights can be overridden per quality tier (Common through Legendary) using backward-compatible `\0Q` keys.
 - Echoes editor table groups echoes with expandable per-quality sub-rows.
 - Scoring and automation respect quality-specific overrides via `LookupWeight`.
+
+### Tome owned column
+- Echoes weight table shows whether each echo is learned on your account (tome owned).
+- Shared column layout extracted to `EchoTableColumns` for consistent headers.
