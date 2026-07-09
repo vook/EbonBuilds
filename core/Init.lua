@@ -36,6 +36,12 @@ local function OnAddonLoaded(addonName)
     EbonBuilds.Toast.Init()
     EbonBuilds.WelcomeView.Init()
     EbonBuilds.BonusView.Init()
+    EbonBuilds.AffixApply.Init()
+    EbonBuilds.AffixScan.Init()
+    EbonBuilds.AffixView.Init()
+    if EbonBuilds.AnvilIntegration and EbonBuilds.AnvilIntegration.Init then
+        EbonBuilds.AnvilIntegration.Init()
+    end
     EbonBuilds.BuildWizard.Init()
     EbonBuilds.MinimapButton.Init()
     EbonBuilds.MainWindow.Init()

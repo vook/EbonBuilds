@@ -445,6 +445,32 @@ end
 
 local SLIDER_W = 400
 
+local function ClampThreshold(val, entry)
+    local num = tonumber(val)
+    if not num then return entry.min end
+    return math.max(entry.min, math.min(entry.max, math.floor(num + 0.5)))
+end
+
+local function SetThresholdValue(slider, entry, rawVal)
+    local v = ClampThreshold(rawVal, entry)
+    slider._updating = true
+    slider:SetValue(v)
+    slider._updating = false
+    if slider._editBox then slider._editBox:SetText(tostring(v)) end
+    local settings = EbonBuilds.BuildForm.GetEditingSettings()
+    settings[entry.key] = v
+    if slider._absLabel then
+        local peak = RefreshPeak()
+        if peak > 0 then
+            slider._absLabel:SetText("= " .. math.floor(peak * v / 100))
+        else
+            slider._absLabel:SetText("")
+        end
+    else
+        RefreshPeak()
+    end
+end
+
 local function CreateThresholdSlider(parent, x, y, entry)
     local lbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     lbl:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
@@ -481,37 +507,57 @@ local function CreateThresholdSlider(parent, x, y, entry)
     thumb:SetHeight(24)
     slider:SetThumbTexture(thumb)
 
-    local valText = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    valText:SetPoint("LEFT", slider, "RIGHT", 8, 0)
-    valText:SetWidth(40)
-    valText:SetJustifyH("LEFT")
-    slider._valText = valText
+    local editContainer = CreateFrame("Frame", nil, parent)
+    editContainer:SetSize(42, 22)
+    editContainer:SetPoint("LEFT", slider, "RIGHT", 8, 0)
+    editContainer:SetBackdrop({
+        bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 8, edgeSize = 8,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    editContainer:SetBackdropColor(0, 0, 0, 0.6)
+    editContainer:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+
+    local editBox = CreateFrame("EditBox", nil, editContainer)
+    editBox:SetSize(36, 18)
+    editBox:SetPoint("CENTER", editContainer, "CENTER", 0, 0)
+    editBox:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+    editBox:SetTextColor(1, 1, 1, 1)
+    editBox:SetJustifyH("CENTER")
+    editBox:SetAutoFocus(false)
+    editBox:SetMaxLetters(4)
+    editBox:SetNumeric(true)
+    slider._editBox = editBox
+
+    local pctLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    pctLabel:SetPoint("LEFT", editContainer, "RIGHT", 2, 0)
+    pctLabel:SetWidth(14)
+    pctLabel:SetJustifyH("LEFT")
+    pctLabel:SetText("%")
 
     local absLabel = nil
     if entry.key ~= "freezePenaltyPct" then
         absLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        absLabel:SetPoint("LEFT", valText, "RIGHT", 2, 0)
+        absLabel:SetPoint("LEFT", pctLabel, "RIGHT", 2, 0)
         absLabel:SetWidth(60)
         absLabel:SetJustifyH("LEFT")
     end
     slider._absLabel = absLabel
 
     slider:SetScript("OnValueChanged", function(self, value)
-        local v = math.floor(value + 0.5)
-        valText:SetText(v .. "%")
-        local settings = EbonBuilds.BuildForm.GetEditingSettings()
-        settings[entry.key] = v
-        if self._absLabel then
-            local peak = RefreshPeak()
-            if peak > 0 then
-                self._absLabel:SetText("= " .. math.floor(peak * v / 100))
-            else
-                self._absLabel:SetText("")
-            end
-        else
-            RefreshPeak()
-        end
+        if self._updating then return end
+        SetThresholdValue(self, entry, value)
     end)
+
+    editBox:SetScript("OnEnterPressed", function(self)
+        SetThresholdValue(slider, entry, self:GetText())
+        self:ClearFocus()
+    end)
+    editBox:SetScript("OnEditFocusLost", function(self)
+        SetThresholdValue(slider, entry, self:GetText())
+    end)
+    editBox:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
 
     return slider
 end
@@ -541,9 +587,7 @@ local function RefreshInputs()
     for _, entry in ipairs(THRESHOLDS) do
         local slider = thresholdSliders[entry.key]
         if slider then
-            local val = settings[entry.key] or 0
-            slider:SetValue(val)
-            slider._valText:SetText(val .. "%")
+            SetThresholdValue(slider, entry, settings[entry.key] or 0)
         end
     end
     RefreshWhitelistToggles()
@@ -553,21 +597,16 @@ local function RefreshInputs()
         echoBanAllButton._value = mode
         echoBanAllButton:SetText(mode == "random" and "Random" or "Highest Score")
     end
-    local peak = RefreshPeak()
-    for _, entry in ipairs(THRESHOLDS) do
-        local slider = thresholdSliders[entry.key]
-        if slider and slider._absLabel then
-            local val = settings[entry.key] or 0
-            if peak > 0 then
-                slider._absLabel:SetText("= " .. math.floor(peak * val / 100))
-            else
-                slider._absLabel:SetText("")
-            end
-        end
-    end
 end
 
 local function CommitFocusedBoxes()
+    for _, entry in ipairs(THRESHOLDS) do
+        local slider = thresholdSliders[entry.key]
+        if slider and slider._editBox and slider._editBox:HasFocus() then
+            SetThresholdValue(slider, entry, slider._editBox:GetText())
+            slider._editBox:ClearFocus()
+        end
+    end
 end
 
 ------------------------------------------------------------------------

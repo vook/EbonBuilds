@@ -9,6 +9,9 @@ modules/build/Build.lua
 modules/data/SpecData.lua
 modules/data/EchoLocations.lua
 modules/data/EchoOwnership.lua
+modules/gear/AffixScan.lua
+modules/gear/AffixApply.lua
+modules/gear/AnvilIntegration.lua
 modules/weights/Weights.lua
 modules/ui/MinimapButton.lua
 modules/ui/MainWindow.lua
@@ -33,6 +36,7 @@ modules/ui/PublicBuildsView.lua
 modules/ui/BonusView.lua
 modules/ui/SettingsView.lua
 modules/ui/BuildTabs.lua
+modules/ui/AffixView.lua
 modules/ui/BuildOverview.lua
 modules/ui/Toast.lua
 modules/ui/SessionHistory.lua
