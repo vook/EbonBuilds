@@ -123,6 +123,87 @@ function EbonBuilds.Scoring.LookupWeight(weights, displayName, quality)
     return LookupWeight(weights, displayName, quality)
 end
 
+local QUALITY_SUFFIX_NAMES = { "common", "uncommon", "rare", "epic", "legendary" }
+
+local function StripQualitySuffix(name)
+    if not name then return name end
+    local base, suffix = name:match("^(.+) %- (.+)$")
+    if base and suffix then
+        local lower = string.lower(suffix)
+        for _, q in ipairs(QUALITY_SUFFIX_NAMES) do
+            if lower == q then return base end
+        end
+    end
+    return name
+end
+
+local function ResolveEchoDisplayName(spellId, fallbackName)
+    local data = ProjectEbonhold.PerkDatabase and ProjectEbonhold.PerkDatabase[spellId]
+    if data and data.comment and data.comment ~= "" then
+        return StripQualitySuffix(data.comment)
+    end
+    if fallbackName and not fallbackName:match("^__id:") then
+        return StripQualitySuffix(fallbackName)
+    end
+    local spellName = GetSpellInfo(spellId)
+    if spellName then return StripQualitySuffix(spellName) end
+    return fallbackName
+end
+
+function EbonBuilds.Scoring.ResolveEchoDisplayName(spellId, fallbackName)
+    return ResolveEchoDisplayName(spellId, fallbackName)
+end
+
+function EbonBuilds.Scoring.GetEchoFamilyKey(spellId, displayName)
+    if spellId and ProjectEbonhold and ProjectEbonhold.PerkDatabase then
+        local data = ProjectEbonhold.PerkDatabase[spellId]
+        if data and data.groupId then
+            return "g:" .. tostring(data.groupId)
+        end
+    end
+    local name = ResolveEchoDisplayName(spellId, displayName)
+    if name then return "n:" .. string.lower(name) end
+    return nil
+end
+
+function EbonBuilds.Scoring.GetHighestPickedQuality(displayName, spellId, granted)
+    local targetKey = displayName and string.lower(displayName)
+    local targetGroupId
+    if spellId and ProjectEbonhold and ProjectEbonhold.PerkDatabase then
+        local data = ProjectEbonhold.PerkDatabase[spellId]
+        targetGroupId = data and data.groupId
+    end
+    local best
+    for key, instances in pairs(granted or {}) do
+        if type(instances) == "table" then
+            for _, inst in ipairs(instances) do
+                local sid = inst and inst.spellId
+                if sid then
+                    local instName = ResolveEchoDisplayName(sid, key)
+                    local sameEcho = targetKey and instName and string.lower(instName) == targetKey
+                    local sameGroup = false
+                    if targetGroupId and ProjectEbonhold.PerkDatabase then
+                        local instData = ProjectEbonhold.PerkDatabase[sid]
+                        sameGroup = instData and instData.groupId == targetGroupId
+                    end
+                    if sameEcho or sameGroup then
+                        local q = inst.quality
+                        if q == nil and ProjectEbonhold.PerkDatabase then
+                            q = ProjectEbonhold.PerkDatabase[sid] and ProjectEbonhold.PerkDatabase[sid].quality or 0
+                        end
+                        if q and (not best or q > best) then best = q end
+                    end
+                end
+            end
+        end
+    end
+    return best
+end
+
+function EbonBuilds.Scoring.IsEchoNovel(displayName, spellId, granted)
+    return EbonBuilds.Scoring.GetHighestPickedQuality(displayName, spellId, granted) == nil
+end
+
 local function MatchesClass(entry, bitVal)
     if not bitVal then return true end
     if not entry.classMask or entry.classMask == 0 then return true end
