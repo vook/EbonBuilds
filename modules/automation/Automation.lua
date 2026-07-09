@@ -132,7 +132,7 @@ local function ScoreChoice(choice, settings)
         families  = data.families,
         classMask = data.classMask,
     }
-    local weight = EbonBuilds.Weights.Get(name) or 0
+    local weight = EbonBuilds.Weights.GetForQuality(name, choice.quality) or 0
     -- Novelty only applies if the player has never picked this echo (by name,
     -- across all quality tiers). Once picked, all qualities lose the bonus.
     local granted = ProjectEbonhold.PerkService.GetGrantedPerks()

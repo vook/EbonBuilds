@@ -162,3 +162,15 @@ function TestScoring.testIsBanned()
     assertFalse(EbonBuilds.Scoring.IsBanned(nil))
     EbonBuilds.Build.GetActive = oldGetActive
 end
+
+function TestScoring.testQualityOverrideFallback()
+    local oldGetActiveWeights = EbonBuilds.Build.GetActiveWeights
+    EbonBuilds.Build.GetActiveWeights = function()
+        return { ["Fireball"] = 50, ["Fireball\0002"] = 80 }
+    end
+    assertEquals(EbonBuilds.Weights.GetForQuality("Fireball", 2), 80)
+    assertEquals(EbonBuilds.Weights.GetForQuality("Fireball", 0), 50)
+    assertTrue(EbonBuilds.Weights.HasQualityOverride("Fireball", 2))
+    assertFalse(EbonBuilds.Weights.HasQualityOverride("Fireball", 0))
+    EbonBuilds.Build.GetActiveWeights = oldGetActiveWeights
+end
