@@ -126,14 +126,13 @@ local function BuildBestByName()
                     existing.groupId = data.groupId
                 end
             end
-            local rs = data.requiredSpell
-            if rs and rs ~= 0 then
+            local ES = EbonBuilds.EchoSources
+            if ES and ES.ResolveRequiresTome and ES.ResolveRequiresTome(data) then
                 existing.requiresTome = true
-                if rs ~= 9 then
-                    if not existing.tomeSpellId or (data.quality or 0) > (existing.tomeQuality or -1) then
-                        existing.tomeSpellId = rs
-                        existing.tomeQuality = data.quality
-                    end
+                local tomeId = ES.ResolveTomeSpellId and ES.ResolveTomeSpellId(data)
+                if tomeId and (not existing.tomeSpellId or (data.quality or 0) > (existing.tomeQuality or -1)) then
+                    existing.tomeSpellId = tomeId
+                    existing.tomeQuality = data.quality
                 end
             end
             existing.qualities[data.quality] = true

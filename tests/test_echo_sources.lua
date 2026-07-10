@@ -116,3 +116,33 @@ function test_clear_selection()
     ES.ClearSelection(selected)
     lu.assertEquals(ES.CountSelected(selected), 0)
 end
+
+function test_resolve_requires_tome_sentinel_nine()
+    lu.assertFalse(ES.ResolveRequiresTome({ requiredSpell = 9 }))
+    lu.assertFalse(ES.ResolveRequiresTome({ requiredSpell = 0 }))
+    lu.assertTrue(ES.ResolveRequiresTome({ requiredSpell = 300100 }))
+end
+
+function test_resolve_requires_tome_override()
+    lu.assertFalse(ES.ResolveRequiresTome({ requiredSpell = 300100, requiresTome = false }))
+    lu.assertTrue(ES.ResolveRequiresTome({ requiredSpell = 0, requiresTome = true }))
+end
+
+function test_aggregate_echo_tome_info_across_qualities()
+    local perkDb = {
+        [1] = { requiredSpell = 9, quality = 0 },
+        [2] = { requiredSpell = 300100, quality = 3 },
+    }
+    local requiresTome, tomeSpellId = ES.AggregateEchoTomeInfo({ [0] = 1, [3] = 2 }, perkDb)
+    lu.assertTrue(requiresTome)
+    lu.assertEquals(tomeSpellId, 300100)
+end
+
+function test_aggregate_echo_tome_info_no_tome_ranks()
+    local perkDb = {
+        [1] = { requiredSpell = 9, quality = 3, requiresTome = false },
+    }
+    local requiresTome, tomeSpellId = ES.AggregateEchoTomeInfo({ [3] = 1 }, perkDb)
+    lu.assertFalse(requiresTome)
+    lu.assertNil(tomeSpellId)
+end

@@ -118,6 +118,45 @@ function ES.LookupPerkData(spellId)
     return perkDb and perkDb[spellId]
 end
 
+function ES.ResolveRequiresTome(data)
+    if not data then return false end
+    if data.requiresTome == false then return false end
+    if data.requiresTome == true then return true end
+    local rs = data.requiredSpell
+    return rs ~= nil and rs ~= 0 and rs ~= 9
+end
+
+function ES.ResolveTomeSpellId(data)
+    if not ES.ResolveRequiresTome(data) then return nil end
+    local rs = data and data.requiredSpell
+    if rs and rs ~= 0 and rs ~= 9 then
+        return rs
+    end
+    return nil
+end
+
+function ES.AggregateEchoTomeInfo(spellIds, perkDb)
+    if not spellIds or not perkDb then return false, nil end
+    local requiresTome = false
+    local tomeSpellId = nil
+    local bestQuality = -1
+    for quality, sid in pairs(spellIds) do
+        local data = perkDb[sid]
+        if data and ES.ResolveRequiresTome(data) then
+            requiresTome = true
+            local rs = ES.ResolveTomeSpellId(data)
+            if rs then
+                local q = quality or data.quality or 0
+                if q > bestQuality then
+                    bestQuality = q
+                    tomeSpellId = rs
+                end
+            end
+        end
+    end
+    return requiresTome, tomeSpellId
+end
+
 function ES.ResolveDropSource(spellId, data)
     data = data or {}
     local locations = EbonBuilds.EchoLocations
@@ -146,13 +185,7 @@ function ES.ResolveDropSource(spellId, data)
         end
     end
 
-    local requiresTome = data.requiredSpell and data.requiredSpell ~= 0
-    if data.requiresTome == false then
-        requiresTome = false
-    elseif data.requiresTome == true then
-        requiresTome = true
-    end
-    if not requiresTome then
+    if not ES.ResolveRequiresTome(data) then
         return "No tome required"
     end
     return "Unknown"
@@ -172,7 +205,7 @@ function ES.ResolveEntryForFilter(entry)
     local requiredSpell = data and data.requiredSpell
     local requiresTome = entry.requiresTome
     if requiresTome == nil then
-        requiresTome = requiredSpell and requiredSpell ~= 0
+        requiresTome = ES.ResolveRequiresTome(data or { requiredSpell = requiredSpell })
     end
 
     local dropSource = entry.dropSource

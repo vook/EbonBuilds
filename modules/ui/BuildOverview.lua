@@ -162,8 +162,11 @@ local function ResolveMissingDropSource(spellId, data)
     if EbonBuilds.EchoSources and EbonBuilds.EchoSources.ResolveDropSource then
         return EbonBuilds.EchoSources.ResolveDropSource(spellId, data)
     end
-    local requiresTome = data.requiredSpell and data.requiredSpell ~= 0
-    if not requiresTome then
+    if EbonBuilds.EchoSources and EbonBuilds.EchoSources.ResolveRequiresTome then
+        if not EbonBuilds.EchoSources.ResolveRequiresTome(data) then
+            return "No tome required"
+        end
+    elseif not data.requiredSpell or data.requiredSpell == 0 or data.requiredSpell == 9 then
         return "No tome required"
     end
     return "Unknown"
@@ -308,6 +311,17 @@ local function ComputeMissingEchoes(build, opts)
             local quality = entry.data.quality or 0
             local baseWeight = EbonBuilds.Scoring.LookupWeight(weights, entry.displayName, quality)
             local score = EbonBuilds.Scoring.EffectiveWeight(scoringEntry, baseWeight, settings, quality)
+            local requiresTome, tomeSpellId = false, nil
+            if EbonBuilds.EchoSources and EbonBuilds.EchoSources.AggregateEchoTomeInfo then
+                requiresTome, tomeSpellId = EbonBuilds.EchoSources.AggregateEchoTomeInfo(
+                    entry.spellIds or { [quality] = entry.spellId },
+                    perkDb
+                )
+            else
+                requiresTome = entry.data.requiredSpell and entry.data.requiredSpell > 0
+                    and entry.data.requiredSpell ~= 9
+                tomeSpellId = requiresTome and entry.data.requiredSpell or nil
+            end
             missing[#missing + 1] = {
                 spellId = entry.spellId,
                 name = entry.displayName,
@@ -330,9 +344,8 @@ local function ComputeMissingEchoes(build, opts)
                     or false,
                 baseWeight = baseWeight,
                 score = score,
-                requiresTome = entry.data.requiredSpell and entry.data.requiredSpell > 0,
-                tomeSpellId = (entry.data.requiredSpell and entry.data.requiredSpell > 0)
-                    and entry.data.requiredSpell or nil,
+                requiresTome = requiresTome,
+                tomeSpellId = tomeSpellId,
             }
         end
     end

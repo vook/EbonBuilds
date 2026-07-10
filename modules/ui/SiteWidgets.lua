@@ -1039,9 +1039,19 @@ end
 local dropDownListSkinned = false
 local LIST_BTN_H_DEFAULT = 16
 local LIST_BTN_H_SITE = 24
+local blizzardDropDownActive = false
 
 local function IsEbonDropDown(dropdown)
     return dropdown and dropdown._ebonSiteDropDown == true
+end
+
+local function shouldStyleDropDownList(list)
+    if blizzardDropDownActive then return false end
+    if not IsEbonDropDown(UIDROPDOWNMENU_OPEN_MENU) then return false end
+    if list and list.dropdown and list.dropdown ~= UIDROPDOWNMENU_OPEN_MENU then
+        return false
+    end
+    return true
 end
 
 local function restoreListButton(btn)
@@ -1067,7 +1077,7 @@ local function restoreListButton(btn)
 end
 
 local function styleListButton(btn)
-    if not btn or not IsEbonDropDown(UIDROPDOWNMENU_OPEN_MENU) then return end
+    if not btn or not shouldStyleDropDownList() then return end
     btn:SetHeight(LIST_BTN_H_SITE)
     local normal = btn:GetNormalTexture()
     if normal then normal:SetAlpha(0) end
@@ -1081,7 +1091,7 @@ local function styleListButton(btn)
         btn._siteHi:Hide()
 
         btn:HookScript("OnEnter", function(self)
-            if not IsEbonDropDown(UIDROPDOWNMENU_OPEN_MENU) then return end
+            if not shouldStyleDropDownList() then return end
             local nameText = _G[self:GetName() .. "NormalText"]
             if self._siteHi and nameText then
                 self._siteHi:ClearAllPoints()
@@ -1149,9 +1159,18 @@ local function restoreList(list)
     end
 end
 
+local function restoreAllDropDownLists()
+    for i = 1, (UIDROPDOWNMENU_MAXLEVELS or 2) do
+        restoreList(_G["DropDownList" .. i])
+    end
+end
+
 local function refreshOpenDropDownList(list)
     if not list or not list:IsShown() then return end
-    if not IsEbonDropDown(UIDROPDOWNMENU_OPEN_MENU) then return end
+    if not shouldStyleDropDownList(list) then
+        restoreList(list)
+        return
+    end
     list._ebonListWasStyled = true
     applyListChrome(list, true)
     local listName = list:GetName()
@@ -1176,7 +1195,7 @@ function SW.EnsureDropDownListSkin()
         if list and not list._ebonSkinHook then
             list._ebonSkinHook = true
             list:HookScript("OnShow", function(self)
-                if IsEbonDropDown(UIDROPDOWNMENU_OPEN_MENU) then
+                if shouldStyleDropDownList(self) then
                     refreshOpenDropDownList(self)
                 else
                     restoreList(self)
@@ -1189,7 +1208,32 @@ function SW.EnsureDropDownListSkin()
         end
     end
 
-    ST.OnThemeChanged(refreshOpenDropDownLists)
+    ST.OnThemeChanged(function()
+        for i = 1, (UIDROPDOWNMENU_MAXLEVELS or 2) do
+            refreshOpenDropDownList(_G["DropDownList" .. i])
+        end
+    end)
+
+    if hooksecurefunc then
+        if not SW._dropDownInitHooked then
+            SW._dropDownInitHooked = true
+            hooksecurefunc("UIDropDownMenu_Initialize", function(dropdown)
+                if IsEbonDropDown(dropdown) then
+                    blizzardDropDownActive = false
+                    return
+                end
+                blizzardDropDownActive = true
+                restoreAllDropDownLists()
+            end)
+        end
+        if not SW._dropDownCloseHooked and CloseDropDownMenus then
+            SW._dropDownCloseHooked = true
+            hooksecurefunc("CloseDropDownMenus", function()
+                blizzardDropDownActive = false
+                restoreAllDropDownLists()
+            end)
+        end
+    end
 end
 
 if not SW._dropDownSetTextHooked and hooksecurefunc then
