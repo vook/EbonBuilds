@@ -103,16 +103,29 @@ local function IsAffixWeaponOnly(affixRecord, affixName)
     return false
 end
 
-local function IsAffixArmorOnly(affixName, affixRecord)
-    return not IsAffixWeaponOnly(affixRecord, affixName)
+local function CountEquippedWeaponOnlyAffixes(equipped)
+    local count = 0
+    for _, slotEntry in ipairs(equipped) do
+        if EbonBuilds.AffixScan.IsWeaponInvSlot(slotEntry.invSlot) and slotEntry.affixName then
+            local record = EbonBuilds.AffixScan.ResolveAffixNameToRecord(slotEntry.affixName)
+            if IsAffixWeaponOnly(record, slotEntry.affixName) then
+                count = count + 1
+            end
+        end
+    end
+    return count
 end
 
-local function SlotFitsAffix(invSlot, affixRecord, affixName)
-    if IsAffixWeaponOnly(affixRecord, affixName) and not EbonBuilds.AffixScan.IsWeaponInvSlot(invSlot) then
-        return false
+local function WeaponSlotsAcceptArmorAffixes(equippedWeaponOnlyCount, plannedWeaponOnlyCount)
+    return (equippedWeaponOnlyCount + plannedWeaponOnlyCount) >= 2
+end
+
+local function SlotFitsAffix(invSlot, affixRecord, affixName, weaponSlotsAcceptArmor)
+    if IsAffixWeaponOnly(affixRecord, affixName) then
+        return EbonBuilds.AffixScan.IsWeaponInvSlot(invSlot)
     end
-    if IsAffixArmorOnly(affixName, affixRecord) and EbonBuilds.AffixScan.IsWeaponInvSlot(invSlot) then
-        return false
+    if EbonBuilds.AffixScan.IsWeaponInvSlot(invSlot) then
+        return weaponSlotsAcceptArmor
     end
     return true
 end
@@ -137,21 +150,21 @@ local function BuildCandidates(equipped, targetSet, targetCounts)
     return candidates
 end
 
-local function SlotTypePreferred(invSlot, affixRecord, toAffix)
+local function SlotTypePreferred(invSlot, affixRecord, toAffix, weaponSlotsAcceptArmor)
     if IsAffixWeaponOnly(affixRecord, toAffix) then
         return EbonBuilds.AffixScan.IsWeaponInvSlot(invSlot)
     end
-    if IsAffixArmorOnly(toAffix, affixRecord) then
-        return not EbonBuilds.AffixScan.IsWeaponInvSlot(invSlot)
+    if EbonBuilds.AffixScan.IsWeaponInvSlot(invSlot) then
+        return weaponSlotsAcceptArmor
     end
     return true
 end
 
-local function FindCandidateIndex(candidates, usedCandidates, affixRecord, toAffix, key, targetSet)
+local function FindCandidateIndex(candidates, usedCandidates, affixRecord, toAffix, key, targetSet, weaponSlotsAcceptArmor)
     local wrongAffix, noAffix, excessBuild = {}, {}, {}
     for i, slotEntry in ipairs(candidates) do
-        if usedCandidates[i] or not SlotFitsAffix(slotEntry.invSlot, affixRecord, toAffix) then
-        elseif not SlotTypePreferred(slotEntry.invSlot, affixRecord, toAffix) then
+        if usedCandidates[i] or not SlotFitsAffix(slotEntry.invSlot, affixRecord, toAffix, weaponSlotsAcceptArmor) then
+        elseif not SlotTypePreferred(slotEntry.invSlot, affixRecord, toAffix, weaponSlotsAcceptArmor) then
         else
             local currentKey = slotEntry.affixName and slotEntry.affixName:lower()
             if not currentKey then
@@ -170,29 +183,26 @@ local function FindCandidateIndex(candidates, usedCandidates, affixRecord, toAff
 end
 
 local function SortMissingKeys(missingKeys, targetCounts)
-    local weapon, armor, other = {}, {}, {}
+    local weapon, armor = {}, {}
     for _, key in ipairs(missingKeys) do
         local toAffix = targetCounts[key].display
         local affixRecord = EbonBuilds.AffixScan.ResolveAffixNameToRecord(toAffix)
         if IsAffixWeaponOnly(affixRecord, toAffix) then
             weapon[#weapon + 1] = key
-        elseif IsAffixArmorOnly(toAffix, affixRecord) then
-            armor[#armor + 1] = key
         else
-            other[#other + 1] = key
+            armor[#armor + 1] = key
         end
     end
     local sorted = {}
     for _, key in ipairs(weapon) do sorted[#sorted + 1] = key end
     for _, key in ipairs(armor) do sorted[#sorted + 1] = key end
-    for _, key in ipairs(other) do sorted[#sorted + 1] = key end
     return sorted
 end
 
-local function CountFittingSlots(candidates, usedCandidates, affixRecord, affixName, onlyFree)
+local function CountFittingSlots(candidates, usedCandidates, affixRecord, affixName, onlyFree, weaponSlotsAcceptArmor)
     local total, free = 0, 0
     for i, slotEntry in ipairs(candidates) do
-        if SlotFitsAffix(slotEntry.invSlot, affixRecord, affixName) then
+        if SlotFitsAffix(slotEntry.invSlot, affixRecord, affixName, weaponSlotsAcceptArmor) then
             total = total + 1
             if not usedCandidates[i] then
                 free = free + 1
@@ -203,25 +213,25 @@ local function CountFittingSlots(candidates, usedCandidates, affixRecord, affixN
     return total
 end
 
-local function NoSlotReason(affixRecord, affixName, candidates, usedCandidates)
-    local freeFitting = CountFittingSlots(candidates, usedCandidates, affixRecord, affixName, true)
+local function NoSlotReason(affixRecord, affixName, candidates, usedCandidates, weaponSlotsAcceptArmor)
+    local freeFitting = CountFittingSlots(candidates, usedCandidates, affixRecord, affixName, true, weaponSlotsAcceptArmor)
     if freeFitting > 0 then
         return "no slot available"
     end
-    local totalFitting = CountFittingSlots(candidates, usedCandidates, affixRecord, affixName, false)
+    local totalFitting = CountFittingSlots(candidates, usedCandidates, affixRecord, affixName, false, weaponSlotsAcceptArmor)
     if totalFitting > 0 then
         return "all matching slots already assigned to other changes"
     end
     if #candidates == 0 then
         return "no changeable gear; build affixes already cover your slots"
     end
-    if IsAffixArmorOnly(affixName, affixRecord) then
-        return "needs armor; none have a changeable affix"
-    end
     if IsAffixWeaponOnly(affixRecord, affixName) then
         return "needs a weapon; none have a changeable affix"
     end
-    return "no changeable gear slot"
+    if not weaponSlotsAcceptArmor then
+        return "needs armor; apply 2 weapon affixes first to use weapon slots"
+    end
+    return "needs armor; none have a changeable affix"
 end
 
 local function MakeSkipStep(slotEntry, toAffix, reason)
@@ -307,10 +317,16 @@ function EbonBuilds.AffixApply.BuildPlan(build)
     local plannedUniqueBases = {}
 
     local usedCandidates = {}
+    local equippedWeaponOnlyCount = CountEquippedWeaponOnlyAffixes(equipped)
+    local plannedWeaponOnlyCount = 0
 
     for _, key in ipairs(missingKeys) do
         local toAffix = targetCounts[key].display
         local affixRecord = EbonBuilds.AffixScan.ResolveAffixNameToRecord(toAffix)
+        local weaponSlotsAcceptArmor = WeaponSlotsAcceptArmorAffixes(
+            equippedWeaponOnlyCount,
+            plannedWeaponOnlyCount
+        )
 
         if not affixRecord then
             plan[#plan + 1] = MakeSkipStep(
@@ -336,10 +352,24 @@ function EbonBuilds.AffixApply.BuildPlan(build)
                 )
                 summary.skipCount = summary.skipCount + 1
             else
-                local chosenIdx = FindCandidateIndex(candidates, usedCandidates, affixRecord, toAffix, key, targetSet)
+                local chosenIdx = FindCandidateIndex(
+                    candidates,
+                    usedCandidates,
+                    affixRecord,
+                    toAffix,
+                    key,
+                    targetSet,
+                    weaponSlotsAcceptArmor
+                )
 
                 if not chosenIdx then
-                    local reason = NoSlotReason(affixRecord, toAffix, candidates, usedCandidates)
+                    local reason = NoSlotReason(
+                        affixRecord,
+                        toAffix,
+                        candidates,
+                        usedCandidates,
+                        weaponSlotsAcceptArmor
+                    )
                     plan[#plan + 1] = MakeSkipStep(
                         { invSlot = 0, slotLabel = "—", link = nil, affixName = nil },
                         toAffix,
@@ -354,6 +384,10 @@ function EbonBuilds.AffixApply.BuildPlan(build)
                     local slotEntry = candidates[chosenIdx]
                     if IsUniqueAffix(toAffix) then
                         plannedUniqueBases[base] = true
+                    end
+                    if IsAffixWeaponOnly(affixRecord, toAffix)
+                        and EbonBuilds.AffixScan.IsWeaponInvSlot(slotEntry.invSlot) then
+                        plannedWeaponOnlyCount = plannedWeaponOnlyCount + 1
                     end
                     plan[#plan + 1] = {
                         invSlot    = slotEntry.invSlot,
