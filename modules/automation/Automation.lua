@@ -20,11 +20,14 @@ end
 local evalTimerFrame    = nil
 local evalTimerElapsed  = 0
 local evalTimerActive   = false
+local evalInProgress    = false
 local pendingChoices    = nil
 local pendingWaitCount  = 0
 local PENDING_WAIT_MAX  = 50
 local suppressAutoHook  = false
 local hooksInstalled    = false
+local hideHookInstalled = false
+local nativePerkUIShow  = nil
 local freezeRoundActive       = false
 local locallyFrozenIndices    = {}
 local seenEchoFamilies        = {}
@@ -36,6 +39,7 @@ local lastShowTime      = 0
 
 local POLICY_IGNORE_FACTOR = 0.05
 local RARE_QUALITY         = 2
+local MAX_AUTOMATION_LEVEL = 80
 
 local function ChoiceSignature(choices)
     if not choices then return nil end
@@ -69,6 +73,35 @@ local ResetAutomationRound
 -- Internal helpers
 ------------------------------------------------------------------------
 
+local function GetLivePickChoices()
+    local ps = ProjectEbonhold and ProjectEbonhold.PerkService
+    if not ps or not ps.GetCurrentChoice then return nil end
+    local choices = ps.GetCurrentChoice()
+    if choices and #choices > 0 then return choices end
+    return nil
+end
+
+local function StopEvalTimer()
+    evalTimerActive = false
+    evalTimerElapsed = 0
+    if evalTimerFrame then
+        evalTimerFrame:Hide()
+    end
+end
+
+local function ClearPickState()
+    pendingChoices = nil
+    pendingWaitCount = 0
+    StopEvalTimer()
+end
+
+local function ClearPickStateIfStale()
+    if not pendingChoices then return end
+    if not GetLivePickChoices() then
+        ClearPickState()
+    end
+end
+
 local function ClearStuckPendingActions()
     local perks = ProjectEbonhold and ProjectEbonhold.Perks
     if not perks then return end
@@ -78,7 +111,16 @@ local function ClearStuckPendingActions()
     perks.pendingFreezeIndex = nil
 end
 
+local function IsInActivePickWindow()
+    return GetLivePickChoices() ~= nil
+end
+
+local function ShouldSuspendAtMaxLevel()
+    return UnitLevel("player") >= MAX_AUTOMATION_LEVEL and not IsInActivePickWindow()
+end
+
 local function UnblockPerkInteraction()
+    if not IsInActivePickWindow() and not pendingChoices then return end
     ClearStuckPendingActions()
     local PerkUI = ProjectEbonhold and ProjectEbonhold.PerkUI
     if PerkUI and PerkUI.ResetSelection then
@@ -92,8 +134,12 @@ local function ShowNativePerkUI()
     UnblockPerkInteraction()
 
     local PerkUI = ProjectEbonhold and ProjectEbonhold.PerkUI
-    local choices = ProjectEbonhold.PerkService.GetCurrentChoice() or pendingChoices
-    if choices and PerkUI and PerkUI.Show then
+    local choices = GetLivePickChoices() or pendingChoices
+    if choices and nativePerkUIShow then
+        suppressAutoHook = true
+        nativePerkUIShow(choices)
+        suppressAutoHook = false
+    elseif choices and PerkUI and PerkUI.Show then
         suppressAutoHook = true
         PerkUI.Show(choices)
         suppressAutoHook = false
@@ -116,28 +162,46 @@ end
 
 local function RunEvaluate()
     if UnitIsDeadOrGhost("player") then
+        ClearPickState()
         return false
     end
+    if evalInProgress then return false end
+    evalInProgress = true
     local ok, result = pcall(EbonBuilds.Automation.Evaluate)
+    evalInProgress = false
     if not ok then
         DEFAULT_CHAT_FRAME:AddMessage(
             "|cffff0000[EbonBuilds] Automation error: " .. tostring(result) .. "|r")
         return false
     end
+    if not result and not GetLivePickChoices() then
+        ClearPickState()
+    end
     return result
 end
 
 local function StartEvalTimer()
+    if not EbonBuilds.Automation.IsEnabled() then return end
+    ClearPickStateIfStale()
+    if not pendingChoices or #pendingChoices == 0 then return end
+    if not GetLivePickChoices() then
+        ClearPickState()
+        return
+    end
     if not evalTimerFrame then
         evalTimerFrame = CreateFrame("Frame")
+        evalTimerFrame:Hide()
         evalTimerFrame:SetScript("OnUpdate", function(self, dt)
+            if not evalTimerActive then return end
             evalTimerElapsed = evalTimerElapsed + dt
             if evalTimerElapsed >= GetEvalDelay() then
-                evalTimerActive = false
-                evalTimerFrame:Hide()
+                StopEvalTimer()
                 local result = RunEvaluate()
                 if result == true or result == "wait" then
                     return
+                end
+                if not GetLivePickChoices() then
+                    ClearPickState()
                 end
                 UnblockPerkInteraction()
             end
@@ -167,6 +231,9 @@ end
 
 local function ScheduleAutomation(choices, opts)
     if UnitIsDeadOrGhost("player") then return end
+    if not choices or #choices == 0 then return end
+    if ShouldSuspendAtMaxLevel() then return end
+    if not EbonBuilds.Automation.IsArmed() then return end
     opts = opts or {}
     if opts.keepFreezeRound == nil and InAutoFreezeRound() then
         opts.keepFreezeRound = true
@@ -185,10 +252,21 @@ local function ScheduleAutomation(choices, opts)
         locallyFrozenIndices = {}
         freezeRoundActive = false
     end
-    if not opts.keepPending then
+    if not opts.keepPending and IsInActivePickWindow() then
         UnblockPerkInteraction()
     end
     StartEvalTimer()
+end
+
+function EbonBuilds.Automation.IsArmed()
+    local build = EbonBuilds.Build.GetActive()
+    return build and build.automationEnabled and true or false
+end
+
+function EbonBuilds.Automation.IsPickPhaseActive()
+    if IsInActivePickWindow() then return true end
+    if UnitLevel("player") >= MAX_AUTOMATION_LEVEL then return false end
+    return EbonBuilds.Automation.IsArmed()
 end
 
 function EbonBuilds.Automation.SetEnabled(enabled)
@@ -197,15 +275,13 @@ function EbonBuilds.Automation.SetEnabled(enabled)
         build.automationEnabled = enabled and true or false
     end
     if not enabled then
+        ClearPickState()
         ResetAutomationRound({ clearDebounce = true })
-        if evalTimerFrame then
-            evalTimerActive = false
-            evalTimerFrame:Hide()
-        end
+        EbonBuilds.Automation.ReleaseHooks()
     else
-        local choices = ProjectEbonhold.PerkService
-            and ProjectEbonhold.PerkService.GetCurrentChoice
-            and ProjectEbonhold.PerkService.GetCurrentChoice()
+        EbonBuilds.Automation.EnsureHooked()
+        if ShouldSuspendAtMaxLevel() then return end
+        local choices = GetLivePickChoices()
         if choices then
             ScheduleAutomation(choices, { bypassDebounce = true })
         end
@@ -213,8 +289,9 @@ function EbonBuilds.Automation.SetEnabled(enabled)
 end
 
 function EbonBuilds.Automation.IsEnabled()
-    local build = EbonBuilds.Build.GetActive()
-    return build and build.automationEnabled and true or false
+    if not EbonBuilds.Automation.IsArmed() then return false end
+    if ShouldSuspendAtMaxLevel() then return false end
+    return true
 end
 
 local lastStatsOfferSig = nil
@@ -231,7 +308,8 @@ local function OnEchoOfferShown(choices)
             EbonBuilds.Build.RecordEchoOffer(build, choices)
         end
     end
-    if not EbonBuilds.Automation.IsEnabled() then return end
+    if not EbonBuilds.Automation.IsArmed() then return end
+    if ShouldSuspendAtMaxLevel() then return end
     ScheduleAutomation(choices)
 end
 
@@ -346,6 +424,9 @@ end
 function EbonBuilds.Automation.ResetRunState()
     echoOffersThisRun = 0
     lastStatsOfferSig = nil
+    evalInProgress = false
+    ClearPickState()
+    ResetAutomationRound({ clearDebounce = true })
     EbonBuilds.Automation.ResetPeakCache()
 end
 
@@ -639,6 +720,7 @@ local function TrySelect(scored, settings, build, choices)
     MarkEchoFamilySeen(pick.spellId, pick.name)
     RecordPick(build, pick.name, pick.quality)
     ResetAutomationRound()
+    pendingChoices = nil
     return true, pick
 end
 
@@ -672,6 +754,7 @@ local function TrySelectFreezeRoundKeeper(scored, settings, build, choices, thre
     MarkEchoFamilySeen(keeper.spellId, keeper.name)
     RecordPick(build, keeper.name, keeper.quality)
     ResetAutomationRound()
+    pendingChoices = nil
     return true, keeper
 end
 
@@ -814,13 +897,20 @@ end
 ------------------------------------------------------------------------
 
 function EbonBuilds.Automation.Evaluate()
+    if ShouldSuspendAtMaxLevel() then
+        ClearPickState()
+        return false
+    end
     if not EbonBuilds.Automation.IsEnabled() then return false end
 
     local build = EbonBuilds.Build.GetActive()
     if not build then return false end
 
-    local choices = ProjectEbonhold.PerkService.GetCurrentChoice()
-    if not choices or #choices == 0 then return false end
+    local choices = GetLivePickChoices()
+    if not choices then
+        ClearPickState()
+        return false
+    end
 
     local settings   = GetAutomationSettings()
     local runData    = GetRunData()
@@ -861,6 +951,7 @@ function EbonBuilds.Automation.Evaluate()
                     MarkEchoFamilySeen(s.spellId, s.name)
                     RecordPick(build, s.name, s.quality)
                     LogAndToast(scored, "Select (Locked)", s.index, choices, settings)
+                    pendingChoices = nil
                     return true
                 end
                 return false
@@ -880,6 +971,7 @@ function EbonBuilds.Automation.Evaluate()
                 end
                 table.sort(scored, function(a, b) return a.index < b.index end)
                 LogAndToast(scored, "Banish", target.index, choices, settings)
+                StartEvalTimer()
                 return true
             end
         end
@@ -952,6 +1044,7 @@ function EbonBuilds.Automation.Evaluate()
                 end
                 table.sort(scored, function(a, b) return a.index < b.index end)
                 LogAndToast(scored, "Banish", target.index, choices, settings)
+                StartEvalTimer()
                 return true
             end
             if WaitForPendingAction() then return "wait" end
@@ -971,47 +1064,74 @@ function EbonBuilds.Automation.Evaluate()
 end
 
 ------------------------------------------------------------------------
--- Hook installation
+-- Hook installation (lazy — only while automation is armed)
 ------------------------------------------------------------------------
 
-function EbonBuilds.Automation.Init()
+local function InstallHooks()
     if hooksInstalled then return true end
     if not ProjectEbonhold or not ProjectEbonhold.PerkUI then return false end
-    if type(ProjectEbonhold.PerkUI) ~= "table" then return false end
-    if not ProjectEbonhold.PerkUI.Show then return false end
-
     local PerkUI = ProjectEbonhold.PerkUI
-    local nativeShow = PerkUI.Show
+    if type(PerkUI) ~= "table" or not PerkUI.Show then return false end
+    if PerkUI._ebonholdHubHooked then
+        DEFAULT_CHAT_FRAME:AddMessage(
+            "|cffffcc00[EbonBuilds] EbonholdHub automation is active — disable it there or turn off EbonholdHub to avoid duplicate perk hooks.|r")
+        return false
+    end
+
+    nativePerkUIShow = nativePerkUIShow or PerkUI.Show
 
     PerkUI.Show = function(choices)
         if not ShouldShowOffer(choices) then
             return
         end
-        nativeShow(choices)
-        OnEchoOfferShown(choices)
+        nativePerkUIShow(choices)
+        if choices and #choices > 0 then
+            OnEchoOfferShown(choices)
+        end
     end
 
-    if PerkUI.UpdateSinglePerk then
-        hooksecurefunc(PerkUI, "UpdateSinglePerk", function()
-            if suppressAutoHook then return end
-            if not EbonBuilds.Automation.IsEnabled() then return end
-            local current = ProjectEbonhold.PerkService.GetCurrentChoice()
-            if current then
-                ScheduleAutomation(current)
-            end
+    if PerkUI.Hide and not hideHookInstalled then
+        hideHookInstalled = true
+        hooksecurefunc(PerkUI, "Hide", function()
+            ClearPickState()
         end)
     end
 
-    -- IMPORTANT: Do not register onEventReceived handlers for perk events here.
-    -- ProjectEbonhold stores one handler per event id; overriding these breaks
-    -- native echo UI state/interaction. Automation relies on PerkUI hooks instead.
-
+    PerkUI._ebonBuildsHooked = true
     hooksInstalled = true
     return true
 end
 
+function EbonBuilds.Automation.ReleaseHooks()
+    ClearPickState()
+    local PerkUI = ProjectEbonhold and ProjectEbonhold.PerkUI
+    if PerkUI and nativePerkUIShow and PerkUI.Show ~= nativePerkUIShow then
+        PerkUI.Show = nativePerkUIShow
+    end
+    hooksInstalled = false
+    if PerkUI then
+        PerkUI._ebonBuildsHooked = nil
+    end
+end
+
+function EbonBuilds.Automation.SyncHookState()
+    if EbonBuilds.Automation.IsArmed() then
+        return EbonBuilds.Automation.EnsureHooked()
+    end
+    EbonBuilds.Automation.ReleaseHooks()
+    return false
+end
+
+function EbonBuilds.Automation.Init()
+    return EbonBuilds.Automation.SyncHookState()
+end
+
 function EbonBuilds.Automation.EnsureHooked()
-    return EbonBuilds.Automation.Init()
+    if not EbonBuilds.Automation.IsArmed() then
+        EbonBuilds.Automation.ReleaseHooks()
+        return false
+    end
+    return InstallHooks()
 end
 
 function EbonBuilds.Automation.ShowManualUI()
@@ -1024,10 +1144,22 @@ hookRetryFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 hookRetryFrame:RegisterEvent("PLAYER_LEVEL_UP")
 hookRetryFrame:SetScript("OnEvent", function(_, event, ...)
     if event == "PLAYER_LEVEL_UP" then
+        local newLevel = ...
+        ClearPickState()
         ResetAutomationRound({ clearDebounce = true })
+        if newLevel and newLevel >= MAX_AUTOMATION_LEVEL then
+            EbonBuilds.Automation.ResetRunState()
+        end
+        EbonBuilds.Automation.SyncHookState()
         return
     end
-    EbonBuilds.Automation.EnsureHooked()
+    if event == "PLAYER_ENTERING_WORLD" then
+        if UnitLevel("player") >= MAX_AUTOMATION_LEVEL then
+            ClearPickState()
+            ResetAutomationRound({ clearDebounce = true })
+        end
+    end
+    EbonBuilds.Automation.SyncHookState()
 end)
 
 EbonBuilds.Automation._ScoreChoice       = ScoreChoice
