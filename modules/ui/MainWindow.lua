@@ -239,6 +239,11 @@ local function BuildFrame()
     frame._settingsPopup = settingsPopup
 
     frame:Hide()
+    frame:SetScript("OnHide", function()
+        if EbonBuilds.SessionHistory and EbonBuilds.SessionHistory.HideCopyDialog then
+            EbonBuilds.SessionHistory.HideCopyDialog()
+        end
+    end)
     if type(UISpecialFrames) == "table" then
         table.insert(UISpecialFrames, FRAME_NAME)
         table.insert(UISpecialFrames, "EbonBuildsGlobalSettingsPopup")

@@ -44,6 +44,7 @@ dofile(addonPath("modules/build/ExportImport.lua"))
 dofile(addonPath("modules/build/Scoring.lua"))
 dofile(addonPath("modules/weights/Weights.lua"))
 dofile(addonPath("modules/automation/Automation.lua"))
+dofile(addonPath("modules/session/Session.lua"))
 dofile(addonPath("modules/sync/Sync.lua"))
 
 -- 5. Test utilities

@@ -438,13 +438,62 @@ function EbonBuilds.SessionHistory.RefreshLogView()
 end
 
 ------------------------------------------------------------------------
--- Export dialog
+-- Copy dialog
 ------------------------------------------------------------------------
 
-local exportDialog
+local copyDialog
 
-local function BuildExportDialog()
-    local f = CreateFrame("Frame", "EbonBuildsExportDialog", UIParent)
+local function HideCopyDialog()
+    if not copyDialog then return end
+    if copyDialog._editBox then
+        copyDialog._editBox:ClearFocus()
+    end
+    copyDialog:Hide()
+end
+
+local function UpdateCopyDialogScroll()
+    if not copyDialog or not copyDialog._scroll or not copyDialog._editBox then return end
+
+    local scroll = copyDialog._scroll
+    local editBox = copyDialog._editBox
+    local bar = copyDialog._bar
+    local scrollW = scroll:GetWidth()
+    local scrollH = scroll:GetHeight()
+    if scrollW <= 0 or scrollH <= 0 then return end
+
+    editBox:SetWidth(scrollW)
+    local text = editBox:GetText() or ""
+    local lineCount = select(2, text:gsub("\n", "\n")) + 1
+    local contentH = math.max(lineCount * 14 + 16, scrollH)
+    editBox:SetHeight(contentH)
+
+    local maxScroll = math.max(0, contentH - scrollH)
+    if maxScroll > 0 then
+        bar:SetMinMaxValues(0, maxScroll)
+        if bar:GetValue() > maxScroll then
+            bar:SetValue(maxScroll)
+        end
+        bar:Show()
+        editBox:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, bar:GetValue())
+    else
+        bar:SetValue(0)
+        bar:SetMinMaxValues(0, 0)
+        bar:Hide()
+        editBox:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 0)
+    end
+end
+
+local function ScrollCopyDialog(delta)
+    if not copyDialog or not copyDialog._bar or not copyDialog._bar:IsShown() then return end
+    local bar = copyDialog._bar
+    local step = 36
+    local v = bar:GetValue()
+    local mn, mx = bar:GetMinMaxValues()
+    bar:SetValue(math.max(mn, math.min(mx, v - delta * step)))
+end
+
+local function BuildCopyDialog()
+    local f = CreateFrame("Frame", "EbonBuildsCopyLogbookDialog", UIParent)
     f:SetSize(800, 550)
     f:SetPoint("CENTER")
     f:SetBackdrop({
@@ -456,50 +505,81 @@ local function BuildExportDialog()
     f:SetBackdropColor(0, 0, 0, 0.9)
     f:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
     f:SetFrameStrata("FULLSCREEN_DIALOG")
+    f:SetToplevel(true)
     f:EnableMouse(true)
     f:SetMovable(true)
     f:SetScript("OnMouseDown", function(self, button)
         if button == "LeftButton" then self:StartMoving() end
     end)
     f:SetScript("OnMouseUp", function(self) self:StopMovingOrSizing() end)
-    f:SetScript("OnHide", function(self) self:StopMovingOrSizing() end)
+    f:SetScript("OnHide", function(self)
+        self:StopMovingOrSizing()
+        if self._editBox then self._editBox:ClearFocus() end
+    end)
+    f:SetScript("OnShow", function(self)
+        self:Raise()
+        if type(PromoteSpecialFrame) == "function" then
+            PromoteSpecialFrame(self:GetName())
+        end
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0, UpdateCopyDialogScroll)
+        else
+            UpdateCopyDialogScroll()
+        end
+    end)
     f:Hide()
 
-    -- Title
+    if type(UISpecialFrames) == "table" then
+        table.insert(UISpecialFrames, f:GetName())
+    end
+
     local title = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    title:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -12)
-    title:SetText("Session Export")
+    title:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -16)
+    title:SetText("Export Logbook")
 
-    -- Close button
+    local hint = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    hint:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
+    hint:SetPoint("RIGHT", f, "RIGHT", -48, 0)
+    hint:SetJustifyH("LEFT")
+    hint:SetText("|cff888888Select all (Ctrl+A) and copy (Ctrl+C), or click Close when done.|r")
+
     local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-    close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
+    close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -6, -6)
+    close:SetFrameLevel(f:GetFrameLevel() + 20)
+    close:SetScript("OnClick", function() HideCopyDialog() end)
 
-    -- ScrollFrame wrapping an EditBox
+    local closeBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    closeBtn:SetSize(80, 22)
+    closeBtn:SetPoint("BOTTOM", f, "BOTTOM", 0, 16)
+    closeBtn:SetText("Close")
+    closeBtn:SetScript("OnClick", function() HideCopyDialog() end)
+
     local scroll = CreateFrame("ScrollFrame", nil, f)
-    scroll:SetPoint("TOPLEFT", title, "BOTTOMLEFT", -2, -8)
-    scroll:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -20, 10)
+    scroll:SetPoint("TOPLEFT", hint, "BOTTOMLEFT", -4, -10)
+    scroll:SetPoint("BOTTOMRIGHT", closeBtn, "TOPRIGHT", -28, 10)
 
     local editBox = CreateFrame("EditBox", nil, scroll)
     editBox:SetMultiLine(true)
+    editBox:SetMaxLetters(0)
     editBox:SetFontObject("GameFontHighlightSmall")
     editBox:SetTextInsets(6, 6, 4, 4)
     editBox:SetAutoFocus(false)
+    editBox:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 0)
+    editBox:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
+    editBox:SetScript("OnEscapePressed", function() HideCopyDialog() end)
+    editBox:SetScript("OnMouseWheel", function(_, delta) ScrollCopyDialog(delta) end)
     scroll:SetScrollChild(editBox)
 
     local bar = CreateFrame("Slider", nil, scroll, "UIPanelScrollBarTemplate")
-    bar:SetPoint("TOPLEFT", scroll, "TOPRIGHT", -2, -4)
-    bar:SetPoint("BOTTOMLEFT", scroll, "BOTTOMRIGHT", -2, 4)
+    bar:SetPoint("TOPLEFT", scroll, "TOPRIGHT", -2, -18)
+    bar:SetPoint("BOTTOMLEFT", scroll, "BOTTOMRIGHT", -2, 18)
     bar:SetValueStep(18)
-
-    bar:SetScript("OnValueChanged", function(self, value)
+    bar:Hide()
+    bar:SetScript("OnValueChanged", function(_, value)
         editBox:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, value)
     end)
     scroll:EnableMouseWheel(true)
-    scroll:SetScript("OnMouseWheel", function(self, delta)
-        local v = bar:GetValue()
-        local mn, mx = bar:GetMinMaxValues()
-        bar:SetValue(math.max(mn, math.min(mx, v - delta * 18)))
-    end)
+    scroll:SetScript("OnMouseWheel", function(_, delta) ScrollCopyDialog(delta) end)
 
     f._editBox = editBox
     f._scroll  = scroll
@@ -508,64 +588,45 @@ local function BuildExportDialog()
     return f
 end
 
-function EbonBuilds.SessionHistory.ExportSession()
-    if not exportDialog then
-        exportDialog = BuildExportDialog()
+local function FocusCopyEditBox()
+    if not copyDialog or not copyDialog._editBox then return end
+    copyDialog._editBox:SetFocus()
+    copyDialog._editBox:HighlightText()
+end
+
+local function ShowCopyDialogForSession(session)
+    if not copyDialog then
+        copyDialog = BuildCopyDialog()
     end
 
+    local text = EbonBuilds.Session.FormatReport(session)
+    copyDialog._editBox:SetText(text)
+    copyDialog._bar:SetValue(0)
+    copyDialog:Show()
+    UpdateCopyDialogScroll()
+    if C_Timer and C_Timer.After then
+        C_Timer.After(0, FocusCopyEditBox)
+    else
+        FocusCopyEditBox()
+    end
+end
+
+function EbonBuilds.SessionHistory.HideCopyDialog()
+    HideCopyDialog()
+end
+
+function EbonBuilds.SessionHistory.ShowCopyDialog()
     local session
     if selectedSessionId then
         for _, s in ipairs(EbonBuilds.Session.GetSessions()) do
             if s.id == selectedSessionId then session = s; break end
         end
     end
+    ShowCopyDialogForSession(session)
+end
 
-    if not session then
-        exportDialog._editBox:SetText("No session selected.")
-        exportDialog._editBox:SetWidth(exportDialog._scroll:GetWidth() - 12)
-        exportDialog._editBox:SetHeight(40)
-    else
-        local lines = {}
-        lines[#lines + 1] = string.format("Session: Level %d | Duration: %s | Soul Ashes: %s",
-            session.maxLevel or UnitLevel("player"),
-            FormatDuration(session.startTime, session.endTime),
-            session.soulAshes or 0)
-        lines[#lines + 1] = ""
-
-        local logs = session.logs or {}
-        for _, entry in ipairs(logs) do
-            local parts = {}
-            parts[#parts + 1] = FormatTimestamp(entry.timestamp)
-            parts[#parts + 1] = string.format("%-16s", entry.action)
-
-            for j, ch in ipairs(entry.choices) do
-                local text = string.format("%s (%.0f)", ch.name, ch.score)
-                if j == entry.targetIndex then
-                    text = ">>" .. text .. "<<"
-                end
-                parts[#parts + 1] = string.format("%-34s", text)
-            end
-
-            local ch = entry.charges or {}
-            parts[#parts + 1] = string.format("B:%d  R:%d  F:%d",
-                ch.ban or 0, ch.reroll or 0, ch.freeze or 0)
-
-            lines[#lines + 1] = table.concat(parts, "")
-        end
-
-        local text = table.concat(lines, "\n")
-        exportDialog._editBox:SetText(text)
-
-        local editW = exportDialog._scroll:GetWidth() - 12
-        exportDialog._editBox:SetWidth(editW)
-        -- Estimate height: ~14px per line + padding
-        local lineCount = #lines + 1
-        local estH = math.max(lineCount * 14 + 12, exportDialog._scroll:GetHeight())
-        exportDialog._editBox:SetHeight(estH)
-        exportDialog._bar:SetMinMaxValues(0, math.max(0, estH - exportDialog._scroll:GetHeight()))
-    end
-
-    exportDialog:Show()
+function EbonBuilds.SessionHistory.ExportSession()
+    EbonBuilds.SessionHistory.ShowCopyDialog()
 end
 
 ------------------------------------------------------------------------
@@ -601,8 +662,14 @@ local function BuildUI(container)
     exportBtn:SetPoint("TOPRIGHT", topPanel, "TOPRIGHT", -110, -2)
     exportBtn:SetNormalFontObject("GameFontHighlightSmall")
     exportBtn:SetText("Export")
+    exportBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:SetText("Export logbook + automation settings for the selected run", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    exportBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     exportBtn:SetScript("OnClick", function()
-        EbonBuilds.SessionHistory.ExportSession()
+        EbonBuilds.SessionHistory.ShowCopyDialog()
     end)
 
     -- Clear All button (right side)
@@ -723,7 +790,7 @@ end
 function EbonBuilds.SessionHistory.Hide()
     if topPanel    then topPanel:Hide()    end
     if bottomPanel then bottomPanel:Hide() end
-    if exportDialog then exportDialog:Hide() end
+    HideCopyDialog()
     if durationTimer then
         durationTimer:Hide()
         activeSessionCard = nil
