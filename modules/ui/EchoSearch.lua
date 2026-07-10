@@ -9,7 +9,9 @@ local prewarmQueue = nil
 local prewarmIndex = 1
 local prewarmCallbacks = {}
 local prewarmPaused = false
-local PREWARM_BATCH = 40
+local PREWARM_BATCH = 8
+local PREWARM_IDLE_DELAY = 0.12
+local PREWARM_COMBAT_DELAY = 0.5
 
 local function StripColorCodes(text)
     if not text then return "" end
@@ -143,12 +145,25 @@ local function FinishPrewarm()
     prewarmCallbacks = {}
 end
 
+function EbonBuilds.EchoSearch.IsPrewarmActive()
+    return prewarmQueue ~= nil
+end
+
+function EbonBuilds.EchoSearch.GetPrewarmProgress()
+    if not prewarmQueue then return nil end
+    return prewarmIndex, #prewarmQueue
+end
+
 function EbonBuilds.EchoSearch.PrewarmStep()
     if not prewarmQueue then return end
     -- Suspend while a loading screen is active. Touching spell/tooltip APIs
     -- (SetHyperlink) mid zone-transition can hard-crash the 3.3.5 client.
     if prewarmPaused then
-        C_Timer.After(0.5, EbonBuilds.EchoSearch.PrewarmStep)
+        C_Timer.After(PREWARM_IDLE_DELAY, EbonBuilds.EchoSearch.PrewarmStep)
+        return
+    end
+    if UnitAffectingCombat and UnitAffectingCombat("player") then
+        C_Timer.After(PREWARM_COMBAT_DELAY, EbonBuilds.EchoSearch.PrewarmStep)
         return
     end
     local last = math.min(prewarmIndex + PREWARM_BATCH - 1, #prewarmQueue)
@@ -161,7 +176,7 @@ function EbonBuilds.EchoSearch.PrewarmStep()
         FinishPrewarm()
         return
     end
-    C_Timer.After(0, EbonBuilds.EchoSearch.PrewarmStep)
+    C_Timer.After(PREWARM_IDLE_DELAY, EbonBuilds.EchoSearch.PrewarmStep)
 end
 
 function EbonBuilds.EchoSearch.StartPrewarm()

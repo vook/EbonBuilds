@@ -7,6 +7,11 @@
 
 EbonBuilds.SettingsView = {}
 
+local SW = EbonBuilds.SiteWidgets
+local ST = EbonBuilds.SiteTheme
+local L  = ST.Layout
+local C  = ST.C
+
 local QUALITY_LABELS = {
     [0] = { name = "Common",    color = "ffffff" },
     [1] = { name = "Uncommon",  color = "19ff19" },
@@ -39,6 +44,7 @@ local THRESHOLDS = {
 
 local viewFrame
 local scrollFrame, scrollChild, scrollBar
+local lastScrollBarShown
 local thresholdSliders = {}
 local peakLabel
 local whitelistToggles = {}
@@ -50,7 +56,84 @@ local echoBanFrame
 local echoBanScroll, echoBanScrollChild, echoBanScrollBar
 local echoBanAllButton
 
+local PAGE_SCROLL_STEP = 20
+local attachEchoBanWheel
+
+local function GetAutomationScrollRange()
+    if not scrollFrame or not scrollChild then return 0 end
+    return math.max(0, (scrollChild:GetHeight() or 0) - (scrollFrame:GetHeight() or 0))
+end
+
+local function GetAutomationScrollPosition()
+    if scrollFrame and scrollFrame.GetVerticalScroll then
+        return scrollFrame:GetVerticalScroll() or 0
+    end
+    if scrollBar then
+        return scrollBar:GetValue() or 0
+    end
+    return 0
+end
+
+local function SetAutomationScrollPosition(value)
+    if not scrollFrame or not scrollBar then return end
+    local range = GetAutomationScrollRange()
+    value = math.max(0, math.min(range, value or 0))
+    if scrollFrame.SetVerticalScroll then
+        scrollFrame:SetVerticalScroll(value)
+    elseif scrollChild then
+        scrollChild:ClearAllPoints()
+        scrollChild:SetPoint("TOPLEFT", scrollFrame, "TOPLEFT", 0, value)
+    end
+    if math.abs((scrollBar:GetValue() or 0) - value) > 0.01 then
+        scrollBar:SetValue(value)
+    end
+end
+
+local function ForwardAutomationPageWheel(delta)
+    if not scrollFrame or not scrollBar or not scrollBar:IsShown() then return end
+    local range = GetAutomationScrollRange()
+    if range <= 0 then return end
+    SetAutomationScrollPosition(GetAutomationScrollPosition() - delta * PAGE_SCROLL_STEP)
+end
+
+local function ForwardEchoBanOrPageWheel(delta)
+    if not echoBanScrollBar then
+        ForwardAutomationPageWheel(delta)
+        return
+    end
+    local current = echoBanScrollBar:GetValue()
+    local min, max = echoBanScrollBar:GetMinMaxValues()
+    if max <= min then
+        ForwardAutomationPageWheel(delta)
+        return
+    end
+    local newVal = math.max(min, math.min(max, current - delta * ICON_STEP))
+    if newVal ~= current then
+        echoBanScrollBar:SetValue(newVal)
+    else
+        ForwardAutomationPageWheel(delta)
+    end
+end
+
+attachEchoBanWheel = function(frame)
+    if not frame or frame._ebonEchoBanWheel then return end
+    if frame == echoBanScroll or frame == echoBanScrollChild then return end
+    if not frame.EnableMouseWheel then return end
+    frame._ebonEchoBanWheel = true
+    frame:EnableMouseWheel(true)
+    frame:SetScript("OnMouseWheel", function(_, wheelDelta)
+        ForwardEchoBanOrPageWheel(wheelDelta)
+    end)
+end
+
 local CONTENT_HEIGHT = 960
+local SCROLLBAR_W = 8
+
+local function SyncScrollInsets()
+    if not scrollFrame or not viewFrame then return end
+    local gutter = (scrollBar and scrollBar:IsShown()) and (SCROLLBAR_W + 4) or 0
+    scrollFrame:SetPoint("BOTTOMRIGHT", viewFrame, "BOTTOMRIGHT", -(gutter), 10)
+end
 
 local function CreateModeToggle(parent, x, y)
     local btn = CreateFrame("Button", nil, parent)
@@ -123,9 +206,9 @@ local function RefreshWhitelistToggles()
     local allSelected = true
     for _, fam in ipairs(FAMILY_ORDER) do
         local row = whitelistToggles[fam]
-        if row and row.checkTex then
+        if row and row._checkbox then
             local selected = settings.banishFamilyWhitelist[fam] or false
-            if selected then row.checkTex:Show() else row.checkTex:Hide() end
+            row._checkbox:SetChecked(selected)
             if not selected then allSelected = false end
         end
     end
@@ -151,67 +234,67 @@ end
 
 local WHITELIST_ROW1 = { "Tank", "Survivability", "Healer", "Caster" }
 local WHITELIST_ROW2 = { "Melee", "Ranged", "No family" }
+local WHITELIST_COL_W = 120
+
+local function CreateWhitelistRow(parent, fam, px, py)
+    local row = CreateFrame("Button", nil, parent)
+    row:SetHeight(20)
+    row:SetPoint("TOPLEFT", parent, "TOPLEFT", px, py)
+    row.family = fam
+    row:RegisterForClicks("LeftButtonUp")
+
+    local cb = SW.CreateCheckbox(row, {
+        size = 14,
+        displayOnly = true,
+    })
+    cb:SetPoint("LEFT", row, "LEFT", 0, 0)
+    row._checkbox = cb
+
+    local lbl = SW.Label(row, fam, 11, ST.C.textDim)
+    lbl:SetPoint("LEFT", cb, "RIGHT", 6, 0)
+    lbl:SetJustifyH("LEFT")
+    row._label = lbl
+
+    row:SetWidth(14 + 6 + (lbl:GetStringWidth() or 0) + 4)
+    row:SetScript("OnClick", function(self)
+        CommitWhitelistToggle(self.family)
+    end)
+
+    whitelistToggles[fam] = row
+    return row
+end
 
 local function BuildBanishWhitelistSection(parent, x, y)
-    local header = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local header = SW.Label(parent, "Banish Protection:", 12, C.text, false, "semibold")
     header:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
-    header:SetText("Banish Protection:")
 
-    local hint = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    local hint = SW.Label(parent, "Checked families are protected from banish.", 10, C.textMuted)
     hint:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -2)
-    hint:SetText("Checked families are protected from banish.")
-
-    local function CreateWhitelistRow(parent, fam, px, py)
-        local row = CreateFrame("Button", nil, parent)
-        row:SetWidth(18)
-        row:SetHeight(18)
-        row:SetPoint("TOPLEFT", parent, "TOPLEFT", px, py)
-        row.family = fam
-
-        local cb = row:CreateTexture(nil, "ARTWORK")
-        cb:SetWidth(14)
-        cb:SetHeight(14)
-        cb:SetPoint("LEFT", row, "LEFT", 2, 0)
-        cb:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
-        cb:Hide()
-        row.checkTex = cb
-
-        local bg = row:CreateTexture(nil, "BORDER")
-        bg:SetWidth(14)
-        bg:SetHeight(14)
-        bg:SetPoint("LEFT", row, "LEFT", 1, 0)
-        bg:SetTexture("Interface\\Buttons\\UI-CheckBox-Up")
-        bg:SetAlpha(0.8)
-
-        row:SetScript("OnClick", function(self) CommitWhitelistToggle(self.family) end)
-        whitelistToggles[fam] = row
-
-        local lbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        lbl:SetText(fam)
-        lbl:SetPoint("LEFT", row, "RIGHT", 4, 0)
-        lbl:SetJustifyH("LEFT")
-    end
 
     for i, fam in ipairs(WHITELIST_ROW1) do
-        CreateWhitelistRow(parent, fam, x + (i - 1) * 110, y - 32)
+        CreateWhitelistRow(parent, fam, x + (i - 1) * WHITELIST_COL_W, y - 32)
     end
 
     for i, fam in ipairs(WHITELIST_ROW2) do
-        CreateWhitelistRow(parent, fam, x + (i - 1) * 110, y - 58)
+        CreateWhitelistRow(parent, fam, x + (i - 1) * WHITELIST_COL_W, y - 58)
     end
 
-    whitelistWarningLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    whitelistWarningLabel = SW.Label(parent,
+        "All families are protected. At least one must be unprotected for banish to work.",
+        10, { 0.95, 0.38, 0.38, 1 })
     whitelistWarningLabel:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y - 86)
     whitelistWarningLabel:SetWidth(400)
     whitelistWarningLabel:SetJustifyH("LEFT")
-    whitelistWarningLabel:SetText("|cffff0000All families are protected. At least one must be unprotected for banish to work.|r")
     whitelistWarningLabel:Hide()
 
-    local banNote = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    local banNote = SW.Label(parent,
+        "Banned echoes with protected families are deprioritized, not excluded from selection. If all offered are banned, the fallback are applied.",
+        10, C.textMuted)
     banNote:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y - 115)
     banNote:SetWidth(490)
     banNote:SetJustifyH("LEFT")
-    banNote:SetText("Banned echoes with protected families are deprioritized, not excluded from selection. If all offered are banned, the fallback are applied.")
+
+    RefreshWhitelistToggles()
 end
 
 ------------------------------------------------------------------------
@@ -268,23 +351,17 @@ local function RefreshBanList()
             btn:RegisterForClicks("LeftButtonUp")
             btn:SetScript("OnEnter", function(self)
                 if not self.spellId then return end
-                local spellName = GetSpellInfo(self.spellId)
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:ClearLines()
-                if spellName then
-                    local q = self._quality or 0
-                    local c = QUALITY_LABELS[q] and QUALITY_LABELS[q].color or "ffffff"
-                    GameTooltip:AddLine(string.format("|cff%s%s|r", c, spellName), 1, 1, 1)
+                if EbonBuilds.EchoTableRows and EbonBuilds.EchoTableRows.ShowEchoTooltip then
+                    EbonBuilds.EchoTableRows.ShowEchoTooltip(self, self.spellId)
                 end
-                if utils and utils.GetSpellDescription then
-                    local desc = utils.GetSpellDescription(self.spellId, 500, 1)
-                    if desc and desc ~= "" then
-                        GameTooltip:AddLine(desc, 1, 1, 1, true)
-                    end
-                end
-                GameTooltip:Show()
             end)
-            btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            btn:SetScript("OnLeave", function()
+                if EbonBuilds.EchoTableRows and EbonBuilds.EchoTableRows.HideEchoTooltip then
+                    EbonBuilds.EchoTableRows.HideEchoTooltip()
+                else
+                    GameTooltip:Hide()
+                end
+            end)
             btn:SetScript("OnClick", function(self)
                 local s = EbonBuilds.BuildForm.GetEditingSettings()
                 local id = self._spellId
@@ -305,6 +382,7 @@ local function RefreshBanList()
         local row = math.floor((idx - 1) / cols)
         btn:SetPoint("TOPLEFT", echoBanScrollChild, "TOPLEFT", BAN_LIST_PADDING + col * ICON_STEP, -BAN_LIST_PADDING - row * ICON_STEP)
         btn:Show()
+        attachEchoBanWheel(btn)
     end
 
     local rows = math.ceil(idx / math.max(cols, 1))
@@ -312,11 +390,7 @@ local function RefreshBanList()
     echoBanScrollChild:SetHeight(contentHeight)
     local range = math.max(0, contentHeight - echoBanFrame:GetHeight())
     echoBanScrollBar:SetMinMaxValues(0, range)
-    if range > 0 then
-        echoBanScroll:EnableMouseWheel(true)
-    else
-        echoBanScroll:EnableMouseWheel(false)
-    end
+    echoBanScroll:EnableMouseWheel(true)
 
     if idx == 0 then
         echoBanFrame._emptyLabel:Show()
@@ -333,19 +407,14 @@ local function AddEchoToBan(name, spellId)
 end
 
 local function BuildEchoBanSection(parent, x, y)
-    local header = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local header = SW.Label(parent, "Echo Ban:", 12, C.text, false, "semibold")
     header:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
-    header:SetText("Echo Ban:")
 
-    local hint = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    local hint = SW.Label(parent, "Echoes listed here get max banish priority and ignore scores.", 10, C.textMuted)
     hint:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -4)
-    hint:SetText("Echoes listed here get max banish priority and ignore scores.")
 
-    local addBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    addBtn:SetWidth(90)
-    addBtn:SetHeight(20)
+    local addBtn = SW.CreateOutlineButton(parent, "Add Echo", 90)
     addBtn:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y - 30)
-    addBtn:SetText("Add Echo")
     addBtn:SetScript("OnClick", function()
         local allList = EbonBuilds.EchoTableRows.BuildAllQualitiesList()
         local settings = EbonBuilds.BuildForm.GetEditingSettings()
@@ -380,47 +449,44 @@ local function BuildEchoBanSection(parent, x, y)
     echoBanScrollBar:SetPoint("BOTTOMLEFT",  listFrame, "BOTTOMRIGHT",  0,  2)
     echoBanScrollBar:SetValueStep(ICON_STEP)
     echoBanScrollBar:SetValue(0)
+    SW.StyleVerticalScrollBar(echoBanScrollBar)
     echoBanScrollBar:SetScript("OnValueChanged", function(self, value)
         echoBanScrollChild:SetPoint("TOPLEFT", echoBanScroll, "TOPLEFT", 0, value)
     end)
 
-    echoBanScroll:EnableMouseWheel(false)
-    echoBanScroll:SetScript("OnMouseWheel", function(self, delta)
-        local current  = echoBanScrollBar:GetValue()
-        local min, max = echoBanScrollBar:GetMinMaxValues()
-        echoBanScrollBar:SetValue(math.max(min, math.min(max, current - delta * ICON_STEP)))
+    echoBanScroll:EnableMouseWheel(true)
+    echoBanScroll:SetScript("OnMouseWheel", function(_, delta)
+        ForwardEchoBanOrPageWheel(delta)
     end)
 
-    local empty = listFrame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    local empty = SW.Label(listFrame, "No echoes banned.", 10, C.textMuted)
     empty:SetPoint("TOPLEFT", listFrame, "TOPLEFT", 10, -4)
-    empty:SetText("No echoes banned.")
     listFrame._emptyLabel = empty
 
     echoBanFrame = listFrame
+    attachEchoBanWheel(listFrame)
+    attachEchoBanWheel(addBtn)
 
-    local allLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    local allLabel = SW.Label(parent, "When all offered are banned and no charges left:", 10, C.textMuted)
     allLabel:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y - 190)
     allLabel:SetWidth(300)
     allLabel:SetJustifyH("LEFT")
-    allLabel:SetText("When all offered are banned and no charges left:")
 
-    echoBanAllButton = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    echoBanAllButton:SetWidth(110)
-    echoBanAllButton:SetHeight(20)
-    echoBanAllButton:SetPoint("TOPLEFT", parent, "TOPLEFT", x + 310, y - 185)
-    echoBanAllButton:SetText("Highest Score")
+    echoBanAllButton = SW.CreateOutlineButton(parent, "Highest Score", 120)
+    echoBanAllButton:SetPoint("TOPLEFT", parent, "TOPLEFT", x + 310, y - 188)
     echoBanAllButton._value = "highestScore"
     echoBanAllButton:SetScript("OnClick", function(self)
         if self._value == "highestScore" then
             self._value = "random"
-            self:SetText("Random")
+            self._label:SetText("Random")
         else
             self._value = "highestScore"
-            self:SetText("Highest Score")
+            self._label:SetText("Highest Score")
         end
         local s = EbonBuilds.BuildForm.GetEditingSettings()
         s.echoBanAllMode = self._value
     end)
+    attachEchoBanWheel(echoBanAllButton)
 end
 
 ------------------------------------------------------------------------
@@ -428,15 +494,15 @@ end
 ------------------------------------------------------------------------
 
 local function BuildPeakRow(parent, x, y)
-    peakLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    peakLabel = SW.Label(parent, "Peak: -", 12, C.text, false, "semibold")
     peakLabel:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
-    peakLabel:SetText("Peak: -")
 
-    local note = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    local note = SW.Label(parent,
+        "The highest echo score for this class after all bonuses are applied. All automation thresholds are percentages of this value. Locked at run start.",
+        10, C.textMuted)
     note:SetPoint("TOPLEFT", peakLabel, "BOTTOMLEFT", 0, -2)
     note:SetWidth(480)
     note:SetJustifyH("LEFT")
-    note:SetText("The highest echo score for this class after all bonuses are applied. All automation thresholds are percentages of this value. Locked at run start.")
 end
 
 ------------------------------------------------------------------------
@@ -444,6 +510,18 @@ end
 ------------------------------------------------------------------------
 
 local SLIDER_W = 400
+local THRESHOLD_BLOCK_GAP = 96
+local THRESHOLD_DIVIDER_W = SLIDER_W + 130
+
+local function CreateThresholdDivider(parent, x, y, width)
+    local line = parent:CreateTexture(nil, "ARTWORK")
+    line:SetTexture(ST.FLAT)
+    line:SetVertexColor(unpack(C.border))
+    line:SetHeight(1)
+    line:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+    line:SetWidth(width)
+    return line
+end
 
 local function ClampThreshold(val, entry)
     local num = tonumber(val)
@@ -472,18 +550,16 @@ local function SetThresholdValue(slider, entry, rawVal)
 end
 
 local function CreateThresholdSlider(parent, x, y, entry)
-    local lbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    local lbl = SW.Label(parent, entry.label, 12, C.text, false, "semibold")
     lbl:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
-    lbl:SetText(entry.label)
 
-    local flavorY = y - 20
+    local flavorY = y - 18
     if entry.flavor then
-        local flavor = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        local flavor = SW.Label(parent, entry.flavor, 10, C.textMuted)
         flavor:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y - 16)
         flavor:SetWidth(SLIDER_W)
         flavor:SetJustifyH("LEFT")
-        flavor:SetText(entry.flavor)
-        flavorY = y - 58
+        flavorY = y - 56
     end
 
     local slider = CreateFrame("Slider", nil, parent)
@@ -495,7 +571,8 @@ local function CreateThresholdSlider(parent, x, y, entry)
     slider:SetValueStep(entry.step)
 
     local track = slider:CreateTexture(nil, "BACKGROUND")
-    track:SetTexture(0.25, 0.25, 0.25, 0.8)
+    track:SetTexture(ST.FLAT)
+    track:SetVertexColor(unpack(C.border))
     track:SetPoint("LEFT", slider, "LEFT", 0, 0)
     track:SetPoint("RIGHT", slider, "RIGHT", 0, 0)
     track:SetPoint("CENTER", slider, "CENTER", 0, 0)
@@ -507,38 +584,23 @@ local function CreateThresholdSlider(parent, x, y, entry)
     thumb:SetHeight(24)
     slider:SetThumbTexture(thumb)
 
-    local editContainer = CreateFrame("Frame", nil, parent)
-    editContainer:SetSize(42, 22)
-    editContainer:SetPoint("LEFT", slider, "RIGHT", 8, 0)
-    editContainer:SetBackdrop({
-        bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 8, edgeSize = 8,
-        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    local editContainer, editBox = SW.CreateNumericEditBox(parent, {
+        width = 42,
+        height = 22,
+        numeric = true,
+        maxLetters = 4,
     })
-    editContainer:SetBackdropColor(0, 0, 0, 0.6)
-    editContainer:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-
-    local editBox = CreateFrame("EditBox", nil, editContainer)
-    editBox:SetSize(36, 18)
-    editBox:SetPoint("CENTER", editContainer, "CENTER", 0, 0)
-    editBox:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
-    editBox:SetTextColor(1, 1, 1, 1)
-    editBox:SetJustifyH("CENTER")
-    editBox:SetAutoFocus(false)
-    editBox:SetMaxLetters(4)
-    editBox:SetNumeric(true)
+    editContainer:SetPoint("LEFT", slider, "RIGHT", 8, 0)
     slider._editBox = editBox
 
-    local pctLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    local pctLabel = SW.Label(parent, "%", 11, C.textDim)
     pctLabel:SetPoint("LEFT", editContainer, "RIGHT", 2, 0)
     pctLabel:SetWidth(14)
     pctLabel:SetJustifyH("LEFT")
-    pctLabel:SetText("%")
 
     local absLabel = nil
     if entry.key ~= "freezePenaltyPct" then
-        absLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        absLabel = SW.Label(parent, "", 11, C.accent)
         absLabel:SetPoint("LEFT", pctLabel, "RIGHT", 2, 0)
         absLabel:SetWidth(60)
         absLabel:SetJustifyH("LEFT")
@@ -559,20 +621,21 @@ local function CreateThresholdSlider(parent, x, y, entry)
     end)
     editBox:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
 
-    return slider
+    return slider, flavorY - 28
 end
 
 local function BuildThresholdsSection(parent, x, y)
-    local header = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local header = SW.Label(parent, "Automation Thresholds:", 12, C.text, false, "semibold")
     header:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
-    header:SetText("Automation Thresholds:")
 
-    local sub = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    local sub = SW.Label(parent, "Values are percentages of the Peak score.", 10, C.textMuted)
     sub:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -2)
-    sub:SetText("Values are percentages of the Peak score.")
 
     for i, entry in ipairs(THRESHOLDS) do
-        local cy = y - 38 - (i - 1) * 85
+        local cy = y - 36 - (i - 1) * THRESHOLD_BLOCK_GAP
+        if i > 1 then
+            CreateThresholdDivider(parent, x, cy + 10, THRESHOLD_DIVIDER_W)
+        end
         local slider = CreateThresholdSlider(parent, x + 10, cy, entry)
         thresholdSliders[entry.key] = slider
     end
@@ -595,7 +658,7 @@ local function RefreshInputs()
     if echoBanAllButton then
         local mode = settings.echoBanAllMode or "highestScore"
         echoBanAllButton._value = mode
-        echoBanAllButton:SetText(mode == "random" and "Random" or "Highest Score")
+        echoBanAllButton._label:SetText(mode == "random" and "Random" or "Highest Score")
     end
 end
 
@@ -613,12 +676,78 @@ end
 -- Scroll helpers
 ------------------------------------------------------------------------
 
+local function IsEchoBanInnerScroll(frame)
+    return frame == echoBanScroll or frame == echoBanScrollChild
+end
+
+local function IsEchoBanSubtree(frame)
+    if not frame or not echoBanFrame then return false end
+    local node = frame
+    while node do
+        if node == echoBanFrame then return true end
+        node = node:GetParent()
+    end
+    return false
+end
+
+local function AttachAutomationPageWheel(frame)
+    if not frame or frame._ebonAutomationPageWheel then return end
+    if frame == scrollBar or IsEchoBanInnerScroll(frame) or IsEchoBanSubtree(frame) then return end
+    if not frame.EnableMouseWheel then return end
+    frame._ebonAutomationPageWheel = true
+    frame:EnableMouseWheel(true)
+    frame:SetScript("OnMouseWheel", function(_, delta)
+        ForwardAutomationPageWheel(delta)
+    end)
+end
+
+local function WalkAutomationFrames(root, attachFn)
+    if not root then return end
+    attachFn(root)
+    if root.GetNumChildren then
+        for i = 1, root:GetNumChildren() do
+            WalkAutomationFrames(select(i, root:GetChildren()), attachFn)
+        end
+    end
+end
+
+local function WireAutomationScroll()
+    if not scrollFrame or not scrollChild or not scrollBar then return end
+    EbonBuilds.ScrollWheel.SetupBar(scrollBar)
+
+    scrollBar:SetScript("OnValueChanged", function(_, value)
+        SetAutomationScrollPosition(value)
+        SW.RepaintVerticalScrollBar(scrollBar)
+    end)
+
+    local function pageWheel(_, delta)
+        ForwardAutomationPageWheel(delta)
+    end
+
+    scrollFrame:EnableMouseWheel(true)
+    scrollFrame:SetScript("OnMouseWheel", pageWheel)
+    scrollChild:EnableMouseWheel(true)
+    scrollChild:SetScript("OnMouseWheel", pageWheel)
+
+    WalkAutomationFrames(scrollChild, AttachAutomationPageWheel)
+    if echoBanFrame then
+        WalkAutomationFrames(echoBanFrame, attachEchoBanWheel)
+    end
+
+    if SW.StyleVerticalScrollBar then
+        SW.StyleVerticalScrollBar(scrollBar)
+    end
+end
+
 local function UpdateScrollRange()
-    if not scrollFrame or not scrollBar then return end
-    local sfHeight = scrollFrame:GetHeight()
-    local range = math.max(0, CONTENT_HEIGHT - sfHeight)
-    scrollBar:SetMinMaxValues(0, range)
-    if scrollBar:GetValue() > range then scrollBar:SetValue(range) end
+    if not scrollFrame or not scrollChild or not scrollBar then return end
+    scrollChild:SetHeight(CONTENT_HEIGHT)
+    local needsBar = SW.UpdateVerticalScroll(scrollFrame, scrollChild, scrollBar)
+    if lastScrollBarShown ~= needsBar then
+        lastScrollBarShown = needsBar
+        SyncScrollInsets()
+    end
+    return needsBar
 end
 
 ------------------------------------------------------------------------
@@ -628,13 +757,12 @@ end
 local function BuildViewFrame(parent)
     local f = CreateFrame("Frame", nil, parent)
 
-    local header = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    local header = SW.Label(f, "Automation", 14, C.text, false, "semibold")
     header:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -10)
-    header:SetText("Automation")
 
     scrollFrame = CreateFrame("ScrollFrame", nil, f)
     scrollFrame:SetPoint("TOPLEFT",     f, "TOPLEFT",     0, -28)
-    scrollFrame:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -22, 10)
+    scrollFrame:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 10)
 
     scrollChild = CreateFrame("Frame", nil, scrollFrame)
     scrollChild:SetWidth(520)
@@ -642,21 +770,11 @@ local function BuildViewFrame(parent)
     scrollFrame:SetScrollChild(scrollChild)
 
     scrollBar = CreateFrame("Slider", nil, scrollFrame, "UIPanelScrollBarTemplate")
-    scrollBar:SetPoint("TOPLEFT",     scrollFrame, "TOPRIGHT",     -2, -4)
-    scrollBar:SetPoint("BOTTOMLEFT",  scrollFrame, "BOTTOMRIGHT",  -2,  4)
+    scrollBar:SetPoint("TOPLEFT",     scrollFrame, "TOPRIGHT",     -SCROLLBAR_W, -4)
+    scrollBar:SetPoint("BOTTOMLEFT",  scrollFrame, "BOTTOMRIGHT",  -SCROLLBAR_W,  4)
     scrollBar:SetValueStep(20)
     scrollBar:SetValue(0)
-
-    scrollBar:SetScript("OnValueChanged", function(self, value)
-        scrollChild:SetPoint("TOPLEFT", scrollFrame, "TOPLEFT", 0, value)
-    end)
-
-    scrollFrame:EnableMouseWheel(true)
-    scrollFrame:SetScript("OnMouseWheel", function(self, delta)
-        local current  = scrollBar:GetValue()
-        local min, max = scrollBar:GetMinMaxValues()
-        scrollBar:SetValue(math.max(min, math.min(max, current - delta * 20)))
-    end)
+    scrollBar:Hide()
 
     scrollFrame:SetScript("OnSizeChanged", UpdateScrollRange)
 
@@ -664,6 +782,8 @@ local function BuildViewFrame(parent)
     BuildEchoBanSection         (scrollChild, 10, -150)
     BuildPeakRow                (scrollChild, 10, -390)
     BuildThresholdsSection      (scrollChild, 10, -440)
+
+    WireAutomationScroll()
 
     return f
 end
@@ -681,7 +801,8 @@ function EbonBuilds.SettingsView.Mount(container)
     RefreshInputs()
     viewFrame:Show()
     UpdateScrollRange()
-    scrollBar:SetValue(0)
+    SetAutomationScrollPosition(0)
+    SW.ScheduleVerticalScroll(scrollFrame, scrollChild, scrollBar)
 end
 
 function EbonBuilds.SettingsView.Unmount()

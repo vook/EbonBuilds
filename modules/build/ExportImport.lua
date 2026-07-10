@@ -332,7 +332,11 @@ local function CreateExportDialog()
 	box:SetWidth(640)
 	box:SetAutoFocus(false)
 	box:SetScript("OnEscapePressed", function() f:Hide() end)
-	scroll:SetScrollChild(box)
+    scroll:SetScrollChild(box)
+
+    if EbonBuilds.SiteWidgets and EbonBuilds.SiteWidgets.StyleScrollFrame then
+        EbonBuilds.SiteWidgets.StyleScrollFrame(scroll)
+    end
 
 	f._editBox = box
 	exportDialog = f
@@ -345,6 +349,122 @@ function EbonBuilds.ExportImport.ShowExportDialog(build)
 	exportDialog._editBox:SetText(b64)
 	exportDialog._editBox:HighlightText()
 	exportDialog:Show()
+end
+
+------------------------------------------------------------------------
+-- Plain-text export dialog (echo weight list, etc.)
+------------------------------------------------------------------------
+
+local textExportDialog
+
+local function StyleExportEditBox(box)
+	if not box then return end
+	local ST = EbonBuilds.SiteTheme
+	local C = ST and ST.C
+	if C then
+		box:SetTextColor(unpack(C.text))
+		local accent = C.accent
+		box:SetHighlightColor(accent[1], accent[2], accent[3], 0.45)
+	else
+		box:SetTextColor(1, 1, 1, 1)
+		box:SetHighlightColor(0.3, 0.55, 0.95, 0.5)
+	end
+	box:SetScript("OnEditFocusGained", function(self)
+		self:HighlightText()
+	end)
+end
+
+local function FocusExportEditBox(box)
+	if not box then return end
+	box:SetFocus()
+	box:HighlightText()
+end
+
+local function CreateTextExportDialog()
+	local SW = EbonBuilds.SiteWidgets
+	local ST = EbonBuilds.SiteTheme
+	local L = ST and ST.Layout or { PAD = 16 }
+
+	local f = CreateFrame("Frame", "EbonBuildsTextExportDialog", UIParent)
+	f:SetSize(560, 420)
+	f:SetPoint("CENTER")
+	if SW then
+		SW.Fill(f, "bg")
+		SW.ThinBorder(f, "border", 1)
+	else
+		f:SetBackdrop({
+			bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
+			edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+			tile = true, tileSize = 16, edgeSize = 32,
+			insets = { left = 11, right = 12, top = 12, bottom = 11 },
+		})
+		f:SetBackdropColor(0, 0, 0, 0.9)
+	end
+	f:SetFrameStrata("FULLSCREEN_DIALOG")
+	f:EnableMouse(true)
+	f:SetMovable(true)
+	f:RegisterForDrag("LeftButton")
+	f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+	f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
+
+	local title = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+	title:SetPoint("TOP", f, "TOP", 0, -14)
+	f._title = title
+
+	local hint
+	if SW and ST then
+		hint = SW.Label(f, "All text selected — press Ctrl+C to copy", 10, ST.C.textMuted)
+		hint:SetPoint("TOP", title, "BOTTOM", 0, -4)
+		f._hint = hint
+	end
+
+	local close = SW.CreateOutlineButton(f, "Close", 80)
+	close:SetPoint("BOTTOM", f, "BOTTOM", 0, 14)
+	close:SetScript("OnClick", function() f:Hide() end)
+
+	local scroll = CreateFrame("ScrollFrame", "EbonBuildsTextExportScroll", f, "UIPanelScrollFrameTemplate")
+	if hint then
+		scroll:SetPoint("TOP", hint, "BOTTOM", 0, -8)
+	else
+		scroll:SetPoint("TOP", title, "BOTTOM", 0, -10)
+	end
+	scroll:SetPoint("BOTTOM", close, "TOP", 0, 10)
+	scroll:SetPoint("LEFT", f, "LEFT", 14, 0)
+	scroll:SetPoint("RIGHT", f, "RIGHT", -14, 0)
+
+	local box = CreateFrame("EditBox", nil, scroll)
+	box:SetMultiLine(true)
+	box:SetMaxLetters(0)
+	box:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+	box:SetWidth(500)
+	box:SetAutoFocus(false)
+	box:SetScript("OnEscapePressed", function() f:Hide() end)
+	StyleExportEditBox(box)
+    scroll:SetScrollChild(box)
+
+    if EbonBuilds.SiteWidgets and EbonBuilds.SiteWidgets.StyleScrollFrame then
+        EbonBuilds.SiteWidgets.StyleScrollFrame(scroll)
+    end
+
+	f._editBox = box
+	textExportDialog = f
+
+	f:SetScript("OnShow", function()
+		if C_Timer and C_Timer.After then
+			C_Timer.After(0.05, function()
+				FocusExportEditBox(f._editBox)
+			end)
+		else
+			FocusExportEditBox(f._editBox)
+		end
+	end)
+end
+
+function EbonBuilds.ExportImport.ShowTextExportDialog(title, text)
+	if not textExportDialog then CreateTextExportDialog() end
+	textExportDialog._title:SetText(title or "Export")
+	textExportDialog._editBox:SetText(text or "")
+	textExportDialog:Show()
 end
 
 ------------------------------------------------------------------------
@@ -414,9 +534,13 @@ local function CreateImportDialog()
 	box:SetWidth(640)
 	box:SetAutoFocus(false)
 	box:SetScript("OnEscapePressed", function() f:Hide() end)
-	scroll:SetScrollChild(box)
+    scroll:SetScrollChild(box)
 
-	local hint = box:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+    if EbonBuilds.SiteWidgets and EbonBuilds.SiteWidgets.StyleScrollFrame then
+        EbonBuilds.SiteWidgets.StyleScrollFrame(scroll)
+    end
+
+    local hint = box:CreateFontString(nil, "OVERLAY", "GameFontDisable")
 	hint:SetPoint("TOPLEFT",  box, "TOPLEFT",  2, -2)
 	hint:SetPoint("TOPRIGHT", box, "TOPRIGHT", -2, -2)
 	hint:SetJustifyH("LEFT")

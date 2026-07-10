@@ -380,6 +380,44 @@ end
 EbonBuilds.Build.PlayerClassToken   = PlayerClassToken
 EbonBuilds.Build.PlayerTopTalentTab = PlayerTopTalentTab
 
+function EbonBuilds.Build.GetPlayerTalentPoints()
+    local pts = { 0, 0, 0 }
+    for i = 1, 3 do
+        local _, _, spent = GetTalentTabInfo(i)
+        pts[i] = spent or 0
+    end
+    return pts
+end
+
+function EbonBuilds.Build.FormatTalentDistribution(build)
+    if not build then return nil end
+    local pts = build.talentPoints
+    local active = EbonBuilds.Build.GetActive and EbonBuilds.Build.GetActive()
+    if active and active.id == build.id then
+        local playerClass = PlayerClassToken()
+        if playerClass and playerClass == build.class then
+            pts = EbonBuilds.Build.GetPlayerTalentPoints()
+        end
+    end
+    if not pts then return nil end
+    return string.format("%d/%d/%d", pts[1] or 0, pts[2] or 0, pts[3] or 0)
+end
+
+function EbonBuilds.Build.CaptureTalentPoints(classToken)
+    if classToken and classToken == PlayerClassToken() then
+        return EbonBuilds.Build.GetPlayerTalentPoints()
+    end
+    return nil
+end
+
+function EbonBuilds.Build.EnsureTalentSnapshot(build)
+    if not build then return nil end
+    if build.talentPoints then return build.talentPoints end
+    if build.class ~= PlayerClassToken() then return nil end
+    build.talentPoints = EbonBuilds.Build.GetPlayerTalentPoints()
+    return build.talentPoints
+end
+
 ------------------------------------------------------------------------
 -- Migration
 ------------------------------------------------------------------------
@@ -418,6 +456,14 @@ function EbonBuilds.Build.Migrate()
         if b.scannedAffixes then
             b.scannedAffixes = EbonBuilds.Build.NormalizeScannedAffixes(b.scannedAffixes)
         end
+        if not b.talentPoints and b.class == PlayerClassToken() then
+            b.talentPoints = EbonBuilds.Build.GetPlayerTalentPoints()
+        end
+    end
+
+    local active = EbonBuilds.Build.GetActive()
+    if active and not active.talentPoints and active.class == PlayerClassToken() then
+        active.talentPoints = EbonBuilds.Build.GetPlayerTalentPoints()
     end
 
     EbonBuilds.Build.MigrateIds()
@@ -779,6 +825,11 @@ end
 function EbonBuilds.Build.SetActive(id)
     if EbonBuildsCharDB.activeBuildId == id then return end
     EbonBuildsCharDB.activeBuildId = id
+    local build = EbonBuilds.Build.Get(id)
+    if build and build.class == PlayerClassToken() then
+        build.talentPoints = EbonBuilds.Build.GetPlayerTalentPoints()
+        build.spec = PlayerTopTalentTab()
+    end
     Notify()
 end
 
@@ -804,6 +855,7 @@ function EbonBuilds.Build.NewObject(data)
         class           = data.class or PlayerClassToken(),
         spec            = data.spec or PlayerTopTalentTab(),
         comments        = data.comments or "",
+        talentPoints    = data.talentPoints,
         lockedEchoes = EbonBuilds.Build.NormalizeLockedEchoes(data.lockedEchoes),
         echoWeights     = data.echoWeights or {},
         scannedAffixes  = data.scannedAffixes,
@@ -885,6 +937,7 @@ function EbonBuilds.Build.Save(id, data)
     build.lockedEchoes = data.lockedEchoes or build.lockedEchoes
     if data.settings then build.settings = data.settings end
     if data.echoWeights then build.echoWeights = data.echoWeights end
+    if data.talentPoints then build.talentPoints = data.talentPoints end
     if data.scannedAffixes ~= nil then build.scannedAffixes = data.scannedAffixes end
     if data.automationEnabled ~= nil then build.automationEnabled = data.automationEnabled end
     if data.isPublic ~= nil then build.isPublic = data.isPublic end

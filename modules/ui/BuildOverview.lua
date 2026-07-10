@@ -4,18 +4,12 @@
 
 EbonBuilds.BuildOverview = {}
 
-local CLASS_COLORS = {
-    WARRIOR     = { 0.78, 0.61, 0.43 },
-    PALADIN     = { 0.96, 0.55, 0.73 },
-    HUNTER      = { 0.67, 0.83, 0.45 },
-    ROGUE       = { 1.0,  0.96, 0.41 },
-    PRIEST      = { 1.0,  1.0,  1.0  },
-    DEATHKNIGHT = { 0.77, 0.12, 0.23 },
-    SHAMAN      = { 0.0,  0.44, 0.87 },
-    MAGE        = { 0.41, 0.8,  0.94 },
-    WARLOCK     = { 0.58, 0.51, 0.79 },
-    DRUID       = { 1.0,  0.49, 0.04 },
-}
+local ST = EbonBuilds.SiteTheme
+local SW = EbonBuilds.SiteWidgets
+local C  = ST.C
+local L  = ST.Layout
+
+local CLASS_COLORS = ST.CLASS_COLORS
 
 local QUALITY_BORDER_COLORS = {
     [0] = { 1.0, 1.0, 1.0 },
@@ -42,6 +36,10 @@ local QUALITY_COLORS = {
 local viewFrame
 local tab1, tab2, tab3, tab4, tab5, tab6
 local contentArea
+local sidebarFrame
+local buildHeader
+local tabBarFrame
+local tabState = { selectedIndex = 1, tabs = {} }
 local state = { build = nil }
 
 ------------------------------------------------------------------------
@@ -161,30 +159,8 @@ local function NormalizeEchoName(name)
 end
 
 local function ResolveMissingDropSource(spellId, data)
-    -- Prefer specific place + mob locations from the World of Echoes map data.
-    local locations = EbonBuilds.EchoLocations
-    if locations and data.groupId and locations[data.groupId] then
-        return locations[data.groupId]
-    end
-    local sources = ProjectEbonhold.PerkDropSources
-    local byGroup = ProjectEbonhold.PerkDropSourceByGroup
-    if sources and sources[spellId] then
-        return sources[spellId]
-    end
-    if data.groupId and byGroup and byGroup[data.groupId] then
-        return byGroup[data.groupId]
-    end
-    -- Some tiers lack a direct entry; scan siblings in the same group.
-    if data.groupId and sources then
-        local perkDb = (EbonBuilds.EchoOwnership and EbonBuilds.EchoOwnership.GetPerkDatabase())
-            or (ProjectEbonhold and ProjectEbonhold.PerkDatabase)
-        if perkDb then
-            for sid, perkData in pairs(perkDb) do
-                if perkData.groupId == data.groupId and sources[sid] then
-                    return sources[sid]
-                end
-            end
-        end
+    if EbonBuilds.EchoSources and EbonBuilds.EchoSources.ResolveDropSource then
+        return EbonBuilds.EchoSources.ResolveDropSource(spellId, data)
     end
     local requiresTome = data.requiredSpell and data.requiredSpell ~= 0
     if not requiresTome then
@@ -291,9 +267,14 @@ local function ComputeMissingEchoes(build, opts)
                             data = data,
                             displayName = displayName,
                             qualities = { [data.quality or 0] = true },
+                            spellIds = { [data.quality or 0] = spellId },
                         }
                     else
                         existing.qualities[data.quality or 0] = true
+                        if not existing.spellIds then
+                            existing.spellIds = { [existing.data.quality or 0] = existing.spellId }
+                        end
+                        existing.spellIds[data.quality or 0] = spellId
                         if (data.quality or 0) > (existing.data.quality or 0) then
                             existing.spellId = spellId
                             existing.data = data
@@ -332,6 +313,7 @@ local function ComputeMissingEchoes(build, opts)
                 name = entry.displayName,
                 quality = quality,
                 qualities = entry.qualities,
+                spellIds = entry.spellIds or { [quality] = entry.spellId },
                 groupId = entry.data.groupId,
                 dropSource = source,
                 sourceMeta = sourceMeta,
@@ -378,141 +360,42 @@ local function BuildOverviewTab(parent)
     local outer = CreateFrame("Frame", nil, parent)
     outer:SetAllPoints(parent)
 
-    -- Class icon + Build name header
-    local classIcon = outer:CreateTexture(nil, "ARTWORK")
-    classIcon:SetWidth(32)
-    classIcon:SetHeight(32)
-    classIcon:SetPoint("TOPLEFT", outer, "TOPLEFT", 10, -10)
-    outer._classIcon = classIcon
+    local card = CreateFrame("Frame", nil, outer)
+    card:SetPoint("TOPLEFT", outer, "TOPLEFT", 0, 0)
+    card:SetPoint("BOTTOMRIGHT", outer, "BOTTOMRIGHT", 0, 0)
+    SW.Fill(card, "mainBg")
+    SW.ThinBorder(card, "borderSoft", 1)
 
-    local nameLabel = outer:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    nameLabel:SetPoint("TOPLEFT", classIcon, "TOPRIGHT", 8, -6)
-    nameLabel:SetPoint("TOPRIGHT", outer, "TOPRIGHT", -10, -16)
-    nameLabel:SetJustifyH("LEFT")
-    outer._nameLabel = nameLabel
+    local descHeader = SW.Label(card, "DESCRIPTION", 11, C.textMuted, false, "semibold")
+    descHeader:SetPoint("TOPLEFT", card, "TOPLEFT", L.PAD, -L.PAD)
 
-    -- Author + last modified
-    local metaLabel = outer:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    metaLabel:SetPoint("TOPLEFT", classIcon, "BOTTOMLEFT", 0, -2)
-    metaLabel:SetPoint("RIGHT",  outer,     "RIGHT",      -10, 0)
-    metaLabel:SetJustifyH("LEFT")
-    outer._metaLabel = metaLabel
-
-    -- Locked echoes
-    local lockedHeader = outer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    lockedHeader:SetPoint("TOPLEFT", metaLabel, "BOTTOMLEFT", 0, -14)
-    lockedHeader:SetText("Locked Echoes:")
-    outer._lockedHeader = lockedHeader
-
-    local lockedButtons = {}
-    local maxSlots = (EbonBuilds.Build and EbonBuilds.Build.MAX_LOCKED_SLOTS) or 6
-    for i = 1, maxSlots do
-        local btn = CreateIconButton(outer, 36)
-        btn:SetPoint("TOPLEFT", lockedHeader, "BOTTOMLEFT", (i - 1) * 42, -6)
-        local border = btn:CreateTexture(nil, "BORDER")
-        border:SetPoint("TOPLEFT",     btn, "TOPLEFT",     -2,  2)
-        border:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT",  2, -2)
-        border:Hide()
-        btn._border = border
-        btn:SetScript("OnEnter", function(self)
-            if not self._spellId then return end
-            local name = GetSpellInfo(self._spellId)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:ClearLines()
-            if name then GameTooltip:AddLine(name, 1, 0.82, 0) end
-            GameTooltip:Show()
-        end)
-        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        lockedButtons[i] = btn
-    end
-    outer._lockedButtons = lockedButtons
-
-    -- Automation toggle + Edit button
-    local autoToggle = CreateFrame("Button", nil, outer, "UIPanelButtonTemplate")
-    autoToggle:SetWidth(140)
-    autoToggle:SetHeight(22)
-    autoToggle:SetPoint("TOPLEFT", lockedButtons[1], "BOTTOMLEFT", 0, -22)
-    autoToggle:SetText("Automation: ON")
-    autoToggle:SetScript("OnClick", function(self)
-        local build = state.build
-        if not build then return end
-        local active = EbonBuilds.Build.GetActive()
-        if active and active.id ~= build.id then
-            DEFAULT_CHAT_FRAME:AddMessage(
-                "|cffffcc00[EbonBuilds] Activate this build to change automation.|r")
-            return
-        end
-        local enabled = not build.automationEnabled
-        build.automationEnabled = enabled
-        if EbonBuilds.Automation.SetEnabled then
-            EbonBuilds.Automation.SetEnabled(enabled)
-        end
-        self:SetText(enabled and "Automation: ON" or "Automation: OFF")
-    end)
-    outer._autoToggle = autoToggle
-
-    local editBtn = CreateFrame("Button", nil, outer, "UIPanelButtonTemplate")
-    editBtn:SetWidth(120)
-    editBtn:SetHeight(22)
-    editBtn:SetPoint("LEFT", autoToggle, "RIGHT", 8, 0)
-    editBtn:SetText("Edit Build")
-    editBtn:SetScript("OnClick", function()
-        if state.build then
-            EbonBuilds.ViewRouter.Show("buildTabs", { mode = "edit", build = state.build })
-        end
-    end)
-
-    local echoJournalBtn = CreateFrame("Button", nil, outer, "UIPanelButtonTemplate")
-    echoJournalBtn:SetWidth(120)
-    echoJournalBtn:SetHeight(22)
-    echoJournalBtn:SetPoint("LEFT", editBtn, "RIGHT", 8, 0)
-    echoJournalBtn:SetText("Echo Journal")
-    echoJournalBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Echo Journal", 1, 0.82, 0)
-        GameTooltip:AddLine("Opens the native /echoes browser.", 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
-    end)
-    echoJournalBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    echoJournalBtn:SetScript("OnClick", function()
-        if EbonBuilds.OpenEchoJournal then
-            EbonBuilds.OpenEchoJournal()
-        end
-    end)
-    outer._echoJournalBtn = echoJournalBtn
-
-    -- Description header
-    local descHeader = outer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    descHeader:SetPoint("TOPLEFT", autoToggle, "BOTTOMLEFT", 0, -14)
-    descHeader:SetText("Description:")
-    outer._descHeader = descHeader
-
-    -- Description scroll frame (owns scrollbar)
-    local descScroll = CreateFrame("ScrollFrame", nil, outer)
-    descScroll:SetPoint("TOPLEFT",     descHeader, "BOTTOMLEFT", 0, -4)
-    descScroll:SetPoint("BOTTOMRIGHT", outer,      "BOTTOMRIGHT", -22, 28)
+    local descScroll = CreateFrame("ScrollFrame", nil, card)
+    descScroll:SetPoint("TOPLEFT", descHeader, "BOTTOMLEFT", 0, -6)
+    descScroll:SetPoint("BOTTOMRIGHT", card, "BOTTOMRIGHT", -L.PAD, 36)
 
     local descChild = CreateFrame("Frame", nil, descScroll)
-    descChild:SetWidth(416)
+    descChild:SetWidth(400)
     descChild:SetHeight(1)
     descScroll:SetScrollChild(descChild)
 
-    local descBar = CreateFrame("Slider", nil, descScroll, "UIPanelScrollBarTemplate")
-    descBar:SetPoint("TOPLEFT",    descScroll, "TOPRIGHT",    -2, -4)
-    descBar:SetPoint("BOTTOMLEFT", descScroll, "BOTTOMRIGHT", -2,  4)
+    local descBar = CreateFrame("Slider", "EbonBuildsOverviewDescBar", descScroll, "UIPanelScrollBarTemplate")
+    descBar:SetPoint("TOPLEFT", descScroll, "TOPRIGHT", -8, -2)
+    descBar:SetPoint("BOTTOMLEFT", descScroll, "BOTTOMRIGHT", -8, 2)
+    descBar:Hide()
+    SW.StyleVerticalScrollBar(descBar)
     EbonBuilds.ScrollWheel.SetupBar(descBar)
     descBar:SetValueStep(1)
     local wireDescWheel = select(1, EbonBuilds.ScrollWheel.Bind(descBar, 20))
     descBar:SetScript("OnValueChanged", function(self, value)
+        descChild:ClearAllPoints()
         descChild:SetPoint("TOPLEFT", descScroll, "TOPLEFT", 0, value)
     end)
     wireDescWheel(descScroll)
     wireDescWheel(descChild)
 
-    -- SMF inside scroll child -- renders text with hyperlink tooltip support
     local descSmf = CreateFrame("ScrollingMessageFrame", nil, descChild)
     descSmf:SetPoint("TOPLEFT", descChild, "TOPLEFT", 0, -2)
-    descSmf:SetWidth(416)
+    descSmf:SetWidth(400)
     descSmf:SetFontObject("GameFontNormalSmall")
     descSmf:SetJustifyH("LEFT")
     descSmf:SetFading(false)
@@ -530,22 +413,65 @@ local function BuildOverviewTab(parent)
         GameTooltip:Hide()
     end)
 
-    -- Hidden FontString with same width -- used only to measure wrapped text height
     local descMeasure = descChild:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    descMeasure:SetWidth(416)
+    descMeasure:SetWidth(400)
     descMeasure:Hide()
+
+    local descPlaceholder = SW.Label(descChild, "", 11, C.textMuted)
+    descPlaceholder:SetPoint("TOPLEFT", descChild, "TOPLEFT", 0, -2)
+    descPlaceholder:SetPoint("RIGHT", descScroll, "RIGHT", -24, 0)
+    descPlaceholder:SetJustifyH("LEFT")
+    descPlaceholder:SetWordWrap(true)
+    descPlaceholder:Hide()
+
+    local function SyncDescWidth()
+        local w = descScroll:GetWidth()
+        if w and w > 40 then
+            descChild:SetWidth(w)
+            descSmf:SetWidth(w)
+            descMeasure:SetWidth(w)
+            if descPlaceholder then
+                descPlaceholder:SetWidth(w - 8)
+            end
+        end
+    end
+
+    local function SyncDescScroll()
+        SyncDescWidth()
+        local visible = descScroll:GetHeight() or 0
+        local content = descChild:GetHeight() or 0
+        local overflow = math.max(0, content - visible)
+        if overflow <= 0 then
+            descBar:Hide()
+            if descBar._siteTrack then descBar._siteTrack:Hide() end
+            descBar:SetMinMaxValues(0, 0)
+            descBar:SetValue(0)
+            descScroll:SetPoint("BOTTOMRIGHT", card, "BOTTOMRIGHT", -L.PAD, 36)
+            descChild:ClearAllPoints()
+            descChild:SetPoint("TOPLEFT", descScroll, "TOPLEFT", 0, 0)
+        else
+            descBar:Show()
+            if descBar._siteTrack then descBar._siteTrack:Show() end
+            descBar:SetMinMaxValues(0, overflow)
+            if descBar:GetValue() > overflow then
+                descBar:SetValue(overflow)
+            end
+            descScroll:SetPoint("BOTTOMRIGHT", card, "BOTTOMRIGHT", -20, 36)
+        end
+    end
+    descScroll:SetScript("OnShow", SyncDescScroll)
+    descScroll:SetScript("OnSizeChanged", SyncDescScroll)
+    outer._syncDescWidth = SyncDescScroll
 
     outer._descSmf = descSmf
     outer._descMeasure = descMeasure
+    outer._descPlaceholder = descPlaceholder
     outer._descScroll = descScroll
     outer._descChild  = descChild
     outer._descBar    = descBar
 
-    -- Delete button (bottom-left, below description, low misclick probability)
-    local deleteBtn = CreateFrame("Button", nil, outer, "UIPanelButtonTemplate")
-    deleteBtn:SetSize(64, 20)
-    deleteBtn:SetPoint("BOTTOMLEFT", outer, "BOTTOMLEFT", 10, 4)
-    deleteBtn:SetText("Delete")
+    local deleteBtn = SW.CreateOutlineButton(card, "Delete", 64)
+    deleteBtn:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", L.PAD, 10)
     deleteBtn:SetScript("OnClick", function()
         local build = state.build
         if not build then return end
@@ -562,96 +488,121 @@ end
 -- Stats tab
 ------------------------------------------------------------------------
 
-local STAT_ROWS = {
+local STAT_ROW1 = {
     { key = "echoesSeen",    label = "Echoes Seen" },
+    { key = "picks",         label = "Picks" },
     { key = "runsCompleted", label = "Runs Completed" },
     { key = "runsReset",     label = "Runs Reset" },
-    { key = "picks",         label = "Picks" },
+}
+
+local STAT_ROW2 = {
     { key = "rerollsUsed",   label = "Rerolls Used" },
     { key = "banishesUsed",  label = "Banishes Used" },
     { key = "freezesUsed",   label = "Freezes Used" },
 }
 
-local function BuildStatsTab(parent)
-    local y = -10
+local STAT_ROWS = {}
+for _, row in ipairs(STAT_ROW1) do STAT_ROWS[#STAT_ROWS + 1] = row end
+for _, row in ipairs(STAT_ROW2) do STAT_ROWS[#STAT_ROWS + 1] = row end
 
-    -- Left column: Build Statistics header + rows
-    local header = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    header:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, y)
-    header:SetText("Build Statistics")
-
-    y = y - 30
-    local valueLabels = {}
-    for i, row in ipairs(STAT_ROWS) do
-        local lbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        lbl:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-        lbl:SetText(row.label .. ":")
-        lbl:SetWidth(160)
-        lbl:SetJustifyH("LEFT")
-
-        local val = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        val:SetPoint("LEFT", lbl, "RIGHT", 4, 0)
-        val:SetText("0")
-        val:SetWidth(60)
-        val:SetJustifyH("RIGHT")
-        valueLabels[row.key] = val
-
-        y = y - 22
+local function LayoutStatCells(parent, rows, startY, columns)
+    local innerW = 388
+    local gap = 6
+    local cellW = math.floor((innerW - gap * (columns - 1)) / columns)
+    local labels = {}
+    for i, row in ipairs(rows) do
+        local cell = SW.CreateStatCell(parent, row.label, "0")
+        cell:SetSize(cellW, 44)
+        local col = (i - 1) % columns
+        local rowIdx = math.floor((i - 1) / columns)
+        cell:SetPoint("TOPLEFT", parent, "TOPLEFT", L.PAD + col * (cellW + gap), startY - rowIdx * 50)
+        labels[row.key] = cell._valueLabel
     end
+    return labels
+end
 
-    -- Most picked / Most banned (left column)
-    y = y - 8
-    local mostPickedLbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    mostPickedLbl:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-    mostPickedLbl:SetText("Most Picked:")
-    mostPickedLbl:SetWidth(100)
-    mostPickedLbl:SetJustifyH("LEFT")
-    local mostPickedVal = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    mostPickedVal:SetPoint("LEFT", mostPickedLbl, "RIGHT", 4, 0)
-    mostPickedVal:SetText("-")
-    mostPickedVal:SetWidth(150)
+local function BuildStatsTab(parent)
+    local card = SW.WrapContentCard(parent, L.PAD)
+
+    local leftBlock = SW.CreateSidebarBlock(card, "Build statistics")
+    leftBlock:SetPoint("TOPLEFT", card, "TOPLEFT", 0, 0)
+    leftBlock:SetWidth(420)
+    leftBlock:SetHeight(300)
+
+    local valueLabels = {}
+    local y = leftBlock._contentTop
+    local row1Labels = LayoutStatCells(leftBlock, STAT_ROW1, y, 4)
+    for key, label in pairs(row1Labels) do valueLabels[key] = label end
+    local row2Y = y - 50
+    local row2Labels = LayoutStatCells(leftBlock, STAT_ROW2, row2Y, 3)
+    for key, label in pairs(row2Labels) do valueLabels[key] = label end
+
+    local gridBottom = row2Y - 50 - 8
+    local mostRow = CreateFrame("Frame", nil, leftBlock)
+    mostRow:SetPoint("TOPLEFT", leftBlock, "TOPLEFT", L.PAD, gridBottom)
+    mostRow:SetPoint("RIGHT", leftBlock, "RIGHT", -L.PAD, 0)
+    mostRow:SetHeight(40)
+
+    local mostPickedLbl = SW.Label(mostRow, "Most Picked Echo", 10, C.textMuted)
+    mostPickedLbl:SetPoint("TOPLEFT", mostRow, "TOPLEFT", 0, 0)
+    local mostPickedVal = SW.Label(mostRow, "-", 11, C.text)
+    mostPickedVal:SetPoint("TOPLEFT", mostPickedLbl, "BOTTOMLEFT", 0, -2)
+    mostPickedVal:SetWidth(180)
     mostPickedVal:SetJustifyH("LEFT")
     valueLabels.mostPicked = mostPickedVal
 
-    y = y - 18
-    local mostBannedLbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    mostBannedLbl:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-    mostBannedLbl:SetText("Most Banned:")
-    mostBannedLbl:SetWidth(100)
-    mostBannedLbl:SetJustifyH("LEFT")
-    local mostBannedVal = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    mostBannedVal:SetPoint("LEFT", mostBannedLbl, "RIGHT", 4, 0)
-    mostBannedVal:SetText("-")
-    mostBannedVal:SetWidth(150)
+    local mostBannedLbl = SW.Label(mostRow, "Most Banned Echo", 10, C.textMuted)
+    mostBannedLbl:SetPoint("TOPLEFT", mostRow, "TOPLEFT", 200, 0)
+    local mostBannedVal = SW.Label(mostRow, "-", 11, C.text)
+    mostBannedVal:SetPoint("TOPLEFT", mostBannedLbl, "BOTTOMLEFT", 0, -2)
+    mostBannedVal:SetWidth(180)
     mostBannedVal:SetJustifyH("LEFT")
     valueLabels.mostBanned = mostBannedVal
 
-    -- Right column: Quality Distribution
-    local qy = -10
-    local qHeader = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    qHeader:SetPoint("TOPLEFT", parent, "TOPLEFT", 270, qy)
-    qHeader:SetText("Quality Distribution:")
+    local rightBlock = SW.CreateSidebarBlock(card, "Quality distribution")
+    rightBlock:SetPoint("TOPLEFT", leftBlock, "TOPRIGHT", 16, 0)
+    rightBlock:SetWidth(220)
+    rightBlock:SetHeight(300)
 
-    qy = qy - 26
     local qualityLabels = {}
+    local qy = rightBlock._contentTop
     for q = 0, 4 do
-        local qlbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        qlbl:SetPoint("TOPLEFT", parent, "TOPLEFT", 274, qy)
-        qlbl:SetText(QUALITY_LABELS[q] .. ":")
+        local qColor = QUALITY_COLORS[q] or { 1, 1, 1 }
+        local qlbl = SW.Label(rightBlock, QUALITY_LABELS[q], 11, qColor)
+        qlbl:SetPoint("TOPLEFT", rightBlock, "TOPLEFT", L.PAD, qy)
         qlbl:SetWidth(90)
-        qlbl:SetJustifyH("LEFT")
-
-        local qval = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        qval:SetPoint("LEFT", qlbl, "RIGHT", 4, 0)
-        qval:SetText("0 (0%)")
-        qval:SetWidth(80)
-        qval:SetJustifyH("RIGHT")
+        local qval = SW.Label(rightBlock, "0 (0%)", 11, C.text)
+        qval:SetPoint("LEFT", qlbl, "RIGHT", 8, 0)
         qualityLabels[q] = qval
-
-        qy = qy - 18
+        qy = qy - 22
     end
 
     return valueLabels, qualityLabels
+end
+
+local function ResolveEchoStatQuality(echoName)
+    if not echoName or echoName == "" then return nil end
+    local spellId = EbonBuilds.EchoTableRows
+        and EbonBuilds.EchoTableRows.ResolveSpellId
+        and EbonBuilds.EchoTableRows.ResolveSpellId(echoName)
+    if not spellId then return nil end
+    local data = ProjectEbonhold and ProjectEbonhold.PerkDatabase
+        and ProjectEbonhold.PerkDatabase[spellId]
+    if not data then return nil end
+    return data.quality or 0
+end
+
+local function SetEchoStatLabel(label, echoName)
+    if not label then return end
+    if not echoName then
+        label:SetText("-")
+        label:SetTextColor(unpack(C.text))
+        return
+    end
+    label:SetText(echoName)
+    local quality = ResolveEchoStatQuality(echoName)
+    local qc = QUALITY_COLORS[quality] or C.text
+    label:SetTextColor(unpack(qc))
 end
 
 local function CreateOverviewScrollFrame(parent)
@@ -659,6 +610,7 @@ local function CreateOverviewScrollFrame(parent)
 
     local child = CreateFrame("Frame", nil, scroll)
     child:SetHeight(1)
+    child:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 0)
     scroll:SetScrollChild(child)
 
     local function SyncChildWidth()
@@ -674,19 +626,46 @@ local function CreateOverviewScrollFrame(parent)
     EbonBuilds.ScrollWheel.SetupBar(bar)
     bar:SetValueStep(1)
     bar:SetValue(0)
+    SW.StyleVerticalScrollBar(bar)
 
     local wireWheel = select(1, EbonBuilds.ScrollWheel.Bind(bar, 16))
 
+    local function UpdateOverviewScroll()
+        if scroll._fixedScrollChild then
+            SW.UpdateVerticalScroll(scroll, child, bar)
+        else
+            SW.ScheduleVerticalScroll(scroll, child, bar)
+        end
+    end
+
     bar:SetScript("OnValueChanged", function(self, value)
-        child:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, value)
+        if scroll._fixedScrollChild then
+            if scroll._onScroll then scroll._onScroll(value) end
+        else
+            child:ClearAllPoints()
+            child:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, value)
+        end
+        if scroll._onScroll and not scroll._fixedScrollChild then
+            scroll._onScroll(value)
+        end
     end)
     wireWheel(scroll)
     wireWheel(child)
 
-    scroll:SetScript("OnSizeChanged", SyncChildWidth)
-    scroll:SetScript("OnShow", SyncChildWidth)
+    scroll:SetScript("OnSizeChanged", function()
+        SyncChildWidth()
+        UpdateOverviewScroll()
+        if scroll._fixedScrollChild and scroll._onScroll then
+            scroll._onScroll()
+        end
+    end)
+    scroll:SetScript("OnShow", function()
+        SyncChildWidth()
+        UpdateOverviewScroll()
+        if scroll._onScroll then scroll._onScroll() end
+    end)
 
-    return scroll, child, bar, SyncChildWidth, wireWheel
+    return scroll, child, bar, SyncChildWidth, wireWheel, UpdateOverviewScroll
 end
 
 ------------------------------------------------------------------------
@@ -694,6 +673,12 @@ end
 ------------------------------------------------------------------------
 
 local missingSearchText = ""
+local missingCatalogBuildId = nil
+local missingCatalogShowAll = nil
+local missingCatalogEntries = nil
+local missingSearchTimer = nil
+local MISS_MAIN_ROW_H = 26
+local MISS_SUB_ROW_H = 24
 local missingRequiresTomeFilter = nil
 local missingMultipleRanksFilter = nil
 local missingShowAllClasses = false
@@ -702,7 +687,55 @@ local missingTomeFilterCb
 local missingTomeFilterLabel
 local missingMultiRankFilterCb
 local missingMultiRankFilterLabel
+local missingClassFilterCb
+local missingClassFilterLabel
 local RefreshMissing
+local LayoutAllMissingRows
+local RefreshMissingVisibleRows
+
+local function InvalidateMissingCatalog()
+    missingCatalogBuildId = nil
+    missingCatalogShowAll = nil
+    missingCatalogEntries = nil
+end
+
+local function ScheduleMissingFilterRefresh()
+    if missingSearchTimer and missingSearchTimer.Cancel then
+        missingSearchTimer:Cancel()
+        missingSearchTimer = nil
+    end
+    if C_Timer and C_Timer.NewTimer then
+        missingSearchTimer = C_Timer.NewTimer(0.2, function()
+            missingSearchTimer = nil
+            RefreshMissing()
+        end)
+        return
+    end
+    if C_Timer and C_Timer.After then
+        C_Timer.After(0.2, RefreshMissing)
+        return
+    end
+    RefreshMissing()
+end
+
+local function GetMissingCatalog(build)
+    local buildId = build.id or tostring(build)
+    if missingCatalogEntries
+        and missingCatalogBuildId == buildId
+        and missingCatalogShowAll == missingShowAllClasses then
+        return missingCatalogEntries
+    end
+
+    local missing = ComputeMissingEchoes(build, {
+        showAllClasses = missingShowAllClasses,
+    })
+    if missing ~= nil then
+        missingCatalogBuildId = buildId
+        missingCatalogShowAll = missingShowAllClasses
+        missingCatalogEntries = missing
+    end
+    return missing
+end
 
 local function LoadMissingFilterPrefs()
     local gs = EbonBuildsDB and EbonBuildsDB.globalSettings
@@ -740,6 +773,28 @@ local function PersistMissingFilterPrefs()
     end
 end
 
+local function SyncMissingClassFilterUI()
+    local box = missingClassFilterCb and missingClassFilterCb._checkbox
+    if not box or not box.SetChecked then return end
+    if missingShowAllClasses then
+        box:SetMarkColor({ 0.6, 0.8, 1.0 })
+        box:SetChecked(true)
+        if missingClassFilterLabel then
+            missingClassFilterLabel:SetText("All Classes")
+            missingClassFilterLabel:SetTextColor(0.6, 0.8, 1.0)
+        end
+    else
+        box:SetChecked(false)
+        if missingClassFilterLabel then
+            missingClassFilterLabel:SetText("All Classes")
+            missingClassFilterLabel:SetTextColor(0.8, 0.8, 0.8)
+        end
+    end
+    if missingClassFilterCb.SetChipWidth then
+        missingClassFilterCb:SetChipWidth()
+    end
+end
+
 local function SyncMissingTomeFilterUI()
     if EbonBuilds.Filters and EbonBuilds.Filters.SyncRequiresTomeFilterUI then
         EbonBuilds.Filters.SyncRequiresTomeFilterUI(
@@ -747,6 +802,16 @@ local function SyncMissingTomeFilterUI()
             missingTomeFilterLabel,
             missingRequiresTomeFilter
         )
+    elseif missingTomeFilterCb and missingTomeFilterCb.SetChipActive then
+        missingTomeFilterCb:SetChipActive(missingRequiresTomeFilter ~= nil)
+        if missingTomeFilterLabel then
+            local suffix = missingRequiresTomeFilter == "only" and " (only)"
+                or missingRequiresTomeFilter == "exclude" and " (exclude)" or ""
+            missingTomeFilterLabel:SetText("Requires Tome" .. suffix)
+        end
+    end
+    if missingTomeFilterCb and missingTomeFilterCb.SetChipWidth then
+        missingTomeFilterCb:SetChipWidth()
     end
 end
 
@@ -757,6 +822,16 @@ local function SyncMissingMultiRankFilterUI()
             missingMultiRankFilterLabel,
             missingMultipleRanksFilter
         )
+    elseif missingMultiRankFilterCb and missingMultiRankFilterCb.SetChipActive then
+        missingMultiRankFilterCb:SetChipActive(missingMultipleRanksFilter ~= nil)
+        if missingMultiRankFilterLabel then
+            local suffix = missingMultipleRanksFilter == "only" and " (only)"
+                or missingMultipleRanksFilter == "exclude" and " (exclude)" or ""
+            missingMultiRankFilterLabel:SetText("Multi-Rank" .. suffix)
+        end
+    end
+    if missingMultiRankFilterCb and missingMultiRankFilterCb.SetChipWidth then
+        missingMultiRankFilterCb:SetChipWidth()
     end
 end
 
@@ -788,230 +863,39 @@ local function CycleMissingMultiRankFilter()
     return missingMultipleRanksFilter
 end
 
-local function CreateFilterCheckbox(parent, labelText, labelColor, anchorFrame, anchorPoint, xOff, yOff, onToggle, relPoint)
-    local cb = CreateFrame("Button", nil, parent)
-    cb:SetSize(16, 16)
-    cb:SetPoint(anchorPoint, anchorFrame, relPoint or anchorPoint, xOff, yOff)
-
-    local cbBg = cb:CreateTexture(nil, "BORDER")
-    cbBg:SetAllPoints(cb)
-    cbBg:SetTexture("Interface\\Buttons\\UI-CheckBox-Up")
-    cbBg:SetAlpha(0.8)
-
-    local cbCheck = cb:CreateTexture(nil, "ARTWORK")
-    cbCheck:SetWidth(14)
-    cbCheck:SetHeight(14)
-    cbCheck:SetPoint("CENTER", cb, "CENTER", 0, 0)
-    cbCheck:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
-    cbCheck:Hide()
-    cb._checkTex = cbCheck
-
-    local cbLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    cbLabel:SetPoint("RIGHT", cb, "LEFT", -4, 0)
-    cbLabel:SetPoint("TOP", cb, "TOP", 0, 0)
-    cbLabel:SetPoint("BOTTOM", cb, "BOTTOM", 0, 0)
-    cbLabel:SetJustifyH("RIGHT")
-    cbLabel:SetJustifyV("MIDDLE")
-    cbLabel:SetText(labelText)
-    if labelColor then
-        cbLabel:SetTextColor(labelColor[1], labelColor[2], labelColor[3])
-    end
-
-    cb:SetScript("OnClick", function()
-        local checked = onToggle()
-        if checked then cbCheck:Show() else cbCheck:Hide() end
-        RefreshMissing()
-    end)
-
-    return cb, cbLabel
-end
-
-local function CreateMissingTomeCycleCheckbox(parent, anchorFrame, anchorPoint, xOff, yOff, relPoint)
-    local cb = CreateFrame("Button", nil, parent)
-    cb:SetSize(16, 16)
-    cb:SetPoint(anchorPoint, anchorFrame, relPoint or anchorPoint, xOff, yOff)
-
-    local cbBg = cb:CreateTexture(nil, "BORDER")
-    cbBg:SetAllPoints(cb)
-    cbBg:SetTexture("Interface\\Buttons\\UI-CheckBox-Up")
-    cbBg:SetAlpha(0.8)
-
-    local cbCheck = cb:CreateTexture(nil, "ARTWORK")
-    cbCheck:SetWidth(14)
-    cbCheck:SetHeight(14)
-    cbCheck:SetPoint("CENTER", cb, "CENTER", 0, 0)
-    cbCheck:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
-    cbCheck:Hide()
-    cb._checkTex = cbCheck
-
-    local cbLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    cbLabel:SetPoint("RIGHT", cb, "LEFT", -4, 0)
-    cbLabel:SetPoint("TOP", cb, "TOP", 0, 0)
-    cbLabel:SetPoint("BOTTOM", cb, "BOTTOM", 0, 0)
-    cbLabel:SetJustifyH("RIGHT")
-    cbLabel:SetJustifyV("MIDDLE")
-    cbLabel:SetText("Requires Tome")
-    cbLabel:SetTextColor(0.8, 0.8, 0.8)
-    missingTomeFilterLabel = cbLabel
-
-    cb:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText("Requires Tome Filter", 1, 0.82, 0)
-        local mode = missingRequiresTomeFilter
-        if mode == "only" then
-            GameTooltip:AddLine("Showing echoes that require a tome only.", 0.8, 0.8, 0.8, true)
-        elseif mode == "exclude" then
-            GameTooltip:AddLine("Showing echoes that do not require a tome only.", 0.8, 0.8, 0.8, true)
-        else
-            GameTooltip:AddLine("No tome filter active.", 0.8, 0.8, 0.8, true)
-        end
-        GameTooltip:AddLine("Click to cycle filter.", 0.6, 0.8, 1)
-        GameTooltip:Show()
-    end)
-    cb:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    cb:SetScript("OnClick", function()
-        CycleMissingTomeFilter()
-        RefreshMissing()
-    end)
-
-    missingTomeFilterCb = cb
-    SyncMissingTomeFilterUI()
-    return cb, cbLabel
-end
-
-local function CreateMissingMultiRankCycleCheckbox(parent, anchorFrame, anchorPoint, xOff, yOff, relPoint)
-    local cb = CreateFrame("Button", nil, parent)
-    cb:SetSize(16, 16)
-    cb:SetPoint(anchorPoint, anchorFrame, relPoint or anchorPoint, xOff, yOff)
-
-    local cbBg = cb:CreateTexture(nil, "BORDER")
-    cbBg:SetAllPoints(cb)
-    cbBg:SetTexture("Interface\\Buttons\\UI-CheckBox-Up")
-    cbBg:SetAlpha(0.8)
-
-    local cbCheck = cb:CreateTexture(nil, "ARTWORK")
-    cbCheck:SetWidth(14)
-    cbCheck:SetHeight(14)
-    cbCheck:SetPoint("CENTER", cb, "CENTER", 0, 0)
-    cbCheck:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
-    cbCheck:Hide()
-    cb._checkTex = cbCheck
-
-    local cbLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    cbLabel:SetPoint("RIGHT", cb, "LEFT", -4, 0)
-    cbLabel:SetPoint("TOP", cb, "TOP", 0, 0)
-    cbLabel:SetPoint("BOTTOM", cb, "BOTTOM", 0, 0)
-    cbLabel:SetJustifyH("RIGHT")
-    cbLabel:SetJustifyV("MIDDLE")
-    cbLabel:SetText("Multi-Rank")
-    cbLabel:SetTextColor(0.8, 0.8, 0.8)
-    missingMultiRankFilterLabel = cbLabel
-
-    cb:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText("Multi-Rank Filter", 1, 0.82, 0)
-        local mode = missingMultipleRanksFilter
-        if mode == "only" then
-            GameTooltip:AddLine("Showing multi-rank echoes only.", 0.8, 0.8, 0.8, true)
-        elseif mode == "exclude" then
-            GameTooltip:AddLine("Hiding multi-rank echoes.", 0.8, 0.8, 0.8, true)
-        else
-            GameTooltip:AddLine("No multi-rank filter active.", 0.8, 0.8, 0.8, true)
-        end
-        GameTooltip:AddLine("Click to cycle filter.", 0.6, 0.8, 1)
-        GameTooltip:Show()
-    end)
-    cb:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    cb:SetScript("OnClick", function()
-        CycleMissingMultiRankFilter()
-        RefreshMissing()
-    end)
-
-    missingMultiRankFilterCb = cb
-    SyncMissingMultiRankFilterUI()
-    return cb, cbLabel
-end
-
-local missingSourceDropdown
+local missingSourceMenu
 
 local function SyncMissingSourceFilterUI()
-    if not missingSourceDropdown then return end
+    if not missingSourceMenu then return end
     local label = EbonBuilds.EchoSources
         and EbonBuilds.EchoSources.FilterLabel(missingSourceFilter)
         or "All sources"
-    UIDropDownMenu_SetText(missingSourceDropdown, label)
+    missingSourceMenu:SetMenuLabel(label)
 end
 
-local function CreateMissingSourceDropdown(parent)
-    local dropdown = CreateFrame("Frame", "EbonBuildsMissingSourceDD", parent, "UIDropDownMenuTemplate")
-    UIDropDownMenu_SetWidth(dropdown, 110)
-
-    local function UpdateLabel()
-        SyncMissingSourceFilterUI()
-    end
-
-    UIDropDownMenu_Initialize(dropdown, function(_, level)
-        local clearInfo = UIDropDownMenu_CreateInfo()
-        clearInfo.text = "Clear all filters"
-        clearInfo.notCheckable = true
-        clearInfo.func = function()
-            if EbonBuilds.EchoSources then
-                EbonBuilds.EchoSources.ClearSelection(missingSourceFilter)
-            else
-                for key in pairs(missingSourceFilter) do
-                    missingSourceFilter[key] = nil
-                end
-            end
-            UpdateLabel()
-            PersistMissingFilterPrefs()
-            RefreshMissing()
-        end
-        UIDropDownMenu_AddButton(clearInfo, level)
-
-        if not EbonBuilds.EchoSources or not EbonBuilds.EchoSources.FILTER_OPTIONS then return end
-        local options = EbonBuilds.EchoSources.FILTER_OPTIONS
-        local lastKind = nil
-        for i = 1, #options do
-            local opt = options[i]
-            if opt.kind ~= lastKind then
-                local header = UIDropDownMenu_CreateInfo()
-                header.isTitle = true
-                header.notCheckable = true
-                if opt.kind == "special" then
-                    header.text = "Other"
-                elseif opt.kind == "open_world" then
-                    header.text = "Open World"
-                elseif opt.kind == "raid" then
-                    header.text = "Raids"
-                else
-                    header.text = "Other"
-                end
-                UIDropDownMenu_AddButton(header, level)
-                lastKind = opt.kind
-            end
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = opt.label
-            info.isNotRadio = true
-            info.keepShownOnClick = true
-            info.arg1 = opt.key
-            info.checked = missingSourceFilter[opt.key] and true or false
-            info.func = function(_, key)
-                if missingSourceFilter[key] then
-                    missingSourceFilter[key] = nil
-                else
-                    missingSourceFilter[key] = true
-                end
-                UpdateLabel()
+local function CreateMissingSourceMenu(parent)
+    local menu
+    menu = SW.CreateSiteMenu(parent, {
+        width = 120,
+        menuWidth = 220,
+        keepOpen = true,
+        getLabel = function()
+            return EbonBuilds.EchoSources
+                and EbonBuilds.EchoSources.FilterLabel(missingSourceFilter)
+                or "All sources"
+        end,
+        buildRows = function()
+            if not EbonBuilds.EchoSources then return {} end
+            return EbonBuilds.EchoSources.BuildFilterMenuRows(missingSourceFilter, function()
+                menu:RefreshLabel()
                 PersistMissingFilterPrefs()
                 RefreshMissing()
-            end
-            UIDropDownMenu_AddButton(info, level)
-        end
-    end)
-
-    missingSourceDropdown = dropdown
-    UpdateLabel()
-    return dropdown
+            end)
+        end,
+    })
+    missingSourceMenu = menu
+    SyncMissingSourceFilterUI()
+    return menu
 end
 
 -- Echoes tab column layout (Echo | Source | Rolled | Tome | Base Weight | Score).
@@ -1032,16 +916,14 @@ local MISS_INSET_TOME        = MISS_INSET_BASE_WEIGHT + MISS_COL_BASE_WEIGHT + M
 local MISS_INSET_ROLLED      = MISS_INSET_TOME + MISS_COL_TOME + MISS_COL_GAP
 
 local missingColumnHeader
+local missingParent
 
 local function SyncRolledDisplay(frame, isRolled)
-    if not frame then return end
+    if not frame or not frame._checkbox then return end
     frame:Show()
-    frame._bg:Show()
-    if isRolled then
-        frame._check:Show()
-    else
-        frame._check:Hide()
-    end
+    frame._checkbox:Show()
+    frame._checkbox:SetChecked(isRolled and true or false)
+    frame._isRolled = isRolled and true or false
 end
 
 local function CreateRolledDisplay(row, opts)
@@ -1055,19 +937,10 @@ local function CreateRolledDisplay(row, opts)
     frame:SetPoint("BOTTOM", row, "BOTTOM", 0, 0)
     frame:SetWidth(width)
 
-    local bg = frame:CreateTexture(nil, "BORDER")
-    bg:SetSize(16, 16)
-    bg:SetPoint("CENTER", frame, "CENTER", 0, 0)
-    bg:SetTexture("Interface\\Buttons\\UI-CheckBox-Up")
-    bg:SetAlpha(0.8)
-    frame._bg = bg
-
-    local check = frame:CreateTexture(nil, "ARTWORK")
-    check:SetSize(14, 14)
-    check:SetPoint("CENTER", bg, "CENTER", 0, 0)
-    check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
-    check:Hide()
-    frame._check = check
+    local SW = EbonBuilds.SiteWidgets
+    local box = SW.CreateCheckbox(frame, { displayOnly = true, size = 16 })
+    box:SetPoint("CENTER", frame, "CENTER", 0, 0)
+    frame._checkbox = box
 
     frame:EnableMouse(true)
     frame:SetScript("OnEnter", function(self)
@@ -1150,6 +1023,8 @@ local function LayoutMissingRow(btn)
     btn._labelSource:SetPoint("RIGHT", btn._rolledDisplay, "LEFT", -MISS_COL_GAP, 0)
     btn._labelSource:SetPoint("TOP", btn, "TOP", 0, -4)
     btn._labelSource:SetJustifyH("LEFT")
+    if btn._labelSource.SetWordWrap then btn._labelSource:SetWordWrap(false) end
+    if btn._labelSource.SetMaxLines then btn._labelSource:SetMaxLines(1) end
     if not btn._echoHit then
         btn._echoHit = CreateFrame("Frame", nil, btn)
         btn._echoHit:EnableMouse(true)
@@ -1174,7 +1049,13 @@ local function LayoutMissingRow(btn)
                 GameTooltip:Show()
             end
         end)
-        btn._echoHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        btn._echoHit:SetScript("OnLeave", function()
+            if EbonBuilds.EchoTableRows and EbonBuilds.EchoTableRows.HideEchoTooltip then
+                EbonBuilds.EchoTableRows.HideEchoTooltip()
+            else
+                GameTooltip:Hide()
+            end
+        end)
     end
     if not btn._sourceHit then
         btn._sourceHit = CreateFrame("Frame", nil, btn)
@@ -1201,82 +1082,94 @@ local function LayoutMissingRow(btn)
 end
 
 local function BuildMissingTab(parent)
-    local headerRow = CreateFrame("Frame", nil, parent)
-    headerRow:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, -10)
-    headerRow:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -18, -10)
-    headerRow:SetHeight(44)
+    local card = SW.WrapContentCard(parent, L.PAD)
 
-    local searchFrame = CreateFrame("Frame", nil, headerRow)
-    searchFrame:SetPoint("TOPLEFT", headerRow, "TOPLEFT", 0, 0)
-    searchFrame:SetPoint("TOPRIGHT", headerRow, "TOPRIGHT", 0, 0)
-    searchFrame:SetHeight(22)
-    searchFrame:SetBackdrop({
-        bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 8, edgeSize = 8,
-        insets = { left = 2, right = 2, top = 2, bottom = 2 },
-    })
-    searchFrame:SetBackdropColor(0, 0, 0, 0.6)
-    searchFrame:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+    local headerRow = CreateFrame("Frame", nil, card)
+    headerRow:SetPoint("TOPLEFT", card, "TOPLEFT", L.PAD, -L.PAD)
+    headerRow:SetPoint("TOPRIGHT", card, "TOPRIGHT", -L.PAD, -L.PAD)
+    headerRow:SetHeight(64)
 
-    local searchEdit = CreateFrame("EditBox", nil, searchFrame)
-    searchEdit:SetHeight(18)
-    searchEdit:SetPoint("LEFT", searchFrame, "LEFT", 4, 0)
-    searchEdit:SetPoint("RIGHT", searchFrame, "RIGHT", -4, 0)
-    searchEdit:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
-    searchEdit:SetTextColor(1, 1, 1, 1)
-    searchEdit:SetAutoFocus(false)
-    searchEdit:SetMaxLetters(60)
-    searchEdit:SetScript("OnTextChanged", function(self)
-        missingSearchText = self:GetText():lower()
-        RefreshMissing()
+    local controlsRow = CreateFrame("Frame", nil, headerRow)
+    controlsRow:SetPoint("TOPLEFT", headerRow, "TOPLEFT", 0, 0)
+    controlsRow:SetPoint("TOPRIGHT", headerRow, "TOPRIGHT", 0, 0)
+    controlsRow:SetHeight(28)
+
+    local sourceMenu = CreateMissingSourceMenu(controlsRow)
+    sourceMenu:SetPoint("TOPRIGHT", controlsRow, "TOPRIGHT", 0, 0)
+
+    local searchFrame, searchEdit = SW.CreateSearchBox(controlsRow, "Search echoes...", function(text)
+        missingSearchText = string.lower(text or "")
+        ScheduleMissingFilterRefresh()
     end)
-    searchEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    searchEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-
-    local sourceDropdown = CreateMissingSourceDropdown(headerRow)
-    sourceDropdown:SetPoint("TOPRIGHT", headerRow, "TOPRIGHT", 0, 0)
-    searchFrame:SetPoint("TOPRIGHT", sourceDropdown, "TOPLEFT", -8, 0)
+    searchFrame:SetPoint("TOPLEFT", controlsRow, "TOPLEFT", 0, 0)
+    searchFrame:SetPoint("RIGHT", sourceMenu, "LEFT", -8, 0)
 
     local filterRow = CreateFrame("Frame", nil, headerRow)
-    filterRow:SetPoint("TOPLEFT", searchFrame, "BOTTOMLEFT", 0, -2)
-    filterRow:SetPoint("TOPRIGHT", searchFrame, "BOTTOMRIGHT", 0, -2)
-    filterRow:SetHeight(22)
+    filterRow:SetPoint("TOPLEFT", controlsRow, "BOTTOMLEFT", 0, -8)
+    filterRow:SetPoint("TOPRIGHT", controlsRow, "BOTTOMRIGHT", 0, -8)
+    filterRow:SetHeight(28)
 
-    local classCb, classLabel = CreateFilterCheckbox(filterRow, "Show All Classes", nil, filterRow, "RIGHT", 0, 0, function()
+    local classChip = SW.CreateTriStateFilterChip(filterRow, "All Classes", function()
         missingShowAllClasses = not missingShowAllClasses
-        return missingShowAllClasses
-    end)
-
-    missingTomeFilterCb, tomeLabel = CreateMissingTomeCycleCheckbox(filterRow, classLabel, "LEFT", -16, 0, "LEFT")
-
-    CreateMissingMultiRankCycleCheckbox(filterRow, tomeLabel, "LEFT", -16, 0, "LEFT")
-
-    local echoJournalBtn = CreateFrame("Button", nil, filterRow, "UIPanelButtonTemplate")
-    echoJournalBtn:SetSize(110, 20)
-    echoJournalBtn:SetPoint("LEFT", filterRow, "LEFT", 0, 0)
-    echoJournalBtn:SetText("Echo Journal")
-    echoJournalBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Echo Journal", 1, 0.82, 0)
-        GameTooltip:AddLine("Opens the native /echoes browser.", 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
-    end)
-    echoJournalBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    echoJournalBtn:SetScript("OnClick", function()
-        if EbonBuilds.OpenEchoJournal then
-            EbonBuilds.OpenEchoJournal()
+        SyncMissingClassFilterUI()
+        InvalidateMissingCatalog()
+        RefreshMissing()
+    end, "Class Filter", function()
+        if missingShowAllClasses then
+            GameTooltip:AddLine("Showing echoes for all classes.", 0.8, 0.8, 0.8, true)
+        else
+            GameTooltip:AddLine("Showing echoes for your class only.", 0.8, 0.8, 0.8, true)
         end
-    end)
+    end, { "All Classes" })
+    classChip:SetPoint("LEFT", filterRow, "LEFT", 0, 0)
+    missingClassFilterCb = classChip
+    missingClassFilterLabel = classChip._label
+
+    local tomeChip = SW.CreateTriStateFilterChip(filterRow, "Requires Tome", function()
+        CycleMissingTomeFilter()
+        SyncMissingTomeFilterUI()
+        RefreshMissing()
+    end, "Requires Tome Filter", function()
+        local mode = missingRequiresTomeFilter
+        if mode == "only" then
+            GameTooltip:AddLine("Showing echoes that require a tome only.", 0.8, 0.8, 0.8, true)
+        elseif mode == "exclude" then
+            GameTooltip:AddLine("Showing echoes that do not require a tome only.", 0.8, 0.8, 0.8, true)
+        else
+            GameTooltip:AddLine("No tome filter active.", 0.8, 0.8, 0.8, true)
+        end
+    end, { "Requires Tome", "Does Not Require Tome" })
+    tomeChip:SetPoint("LEFT", classChip, "RIGHT", 12, 0)
+    missingTomeFilterCb = tomeChip
+    missingTomeFilterLabel = tomeChip._label
+
+    local multiChip = SW.CreateTriStateFilterChip(filterRow, "Multi-Rank", function()
+        CycleMissingMultiRankFilter()
+        SyncMissingMultiRankFilterUI()
+        RefreshMissing()
+    end, "Multi-Rank Filter", function()
+        local mode = missingMultipleRanksFilter
+        if mode == "only" then
+            GameTooltip:AddLine("Showing multi-rank echoes only.", 0.8, 0.8, 0.8, true)
+        elseif mode == "exclude" then
+            GameTooltip:AddLine("Hiding multi-rank echoes.", 0.8, 0.8, 0.8, true)
+        else
+            GameTooltip:AddLine("No multi-rank filter active.", 0.8, 0.8, 0.8, true)
+        end
+    end, { "Multi-Rank", "Exclude Multi-Rank" })
+    multiChip:SetPoint("LEFT", tomeChip, "RIGHT", 12, 0)
+    missingMultiRankFilterCb = multiChip
+    missingMultiRankFilterLabel = multiChip._label
 
     LoadMissingFilterPrefs()
+    SyncMissingClassFilterUI()
     SyncMissingTomeFilterUI()
     SyncMissingMultiRankFilterUI()
     SyncMissingSourceFilterUI()
 
-    missingColumnHeader = CreateFrame("Frame", nil, parent)
-    missingColumnHeader:SetPoint("TOPLEFT", headerRow, "BOTTOMLEFT", 0, -6)
-    missingColumnHeader:SetPoint("TOPRIGHT", headerRow, "BOTTOMRIGHT", 0, -6)
+    missingColumnHeader = CreateFrame("Frame", nil, card)
+    missingColumnHeader:SetPoint("TOPLEFT", headerRow, "BOTTOMLEFT", 0, -10)
+    missingColumnHeader:SetPoint("TOPRIGHT", headerRow, "BOTTOMRIGHT", 0, -10)
     missingColumnHeader:SetHeight(16)
 
     local function MakeMissHdr(text, justify)
@@ -1317,9 +1210,14 @@ local function BuildMissingTab(parent)
     end)
     rolledHdr:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    local scroll, child, bar, syncWidth, wireWheel = CreateOverviewScrollFrame(parent)
-    scroll:SetPoint("TOPLEFT", missingColumnHeader, "BOTTOMLEFT", 0, -4)
-    scroll:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -18, 8)
+    local scroll, child, bar, syncWidth, wireWheel = CreateOverviewScrollFrame(card)
+    scroll._fixedScrollChild = true
+    scroll._layoutCard = card
+    scroll._layoutHeader = missingColumnHeader
+    missingCollectionCard = card
+    scroll._onScroll = function()
+        if RefreshMissingVisibleRows then RefreshMissingVisibleRows() end
+    end
 
     LayoutMissingHeader({
         _echo       = MakeMissHdr("Echo", "LEFT"),
@@ -1340,38 +1238,477 @@ end
 ------------------------------------------------------------------------
 
 local overviewOuter
-local overviewDescSmf, overviewDescMeasure, overviewDescScroll, overviewDescChild, overviewDescBar
+local overviewDescSmf, overviewDescMeasure, overviewDescPlaceholder, overviewDescScroll, overviewDescChild, overviewDescBar
+
+local DESC_PLACEHOLDER = "No description yet. Edit this build to add notes."
 local statsValueLabels, statsQualityLabels
 local missingScroll, missingChild, missingBar
 local missingWireWheel
+local missingCollectionCard
+local collectionLayoutPass = 0
 local missingRows = {}
+local missingSubRows = {}
+local missingDisplayRows = {}
+local missingRowOffsetY = {}
+local missingDisplayCount = 0
+
+local function ComputeCollectionScrollHeight()
+    local card = missingCollectionCard or (missingScroll and missingScroll._layoutCard)
+    local header = missingColumnHeader or (missingScroll and missingScroll._layoutHeader)
+    if not card or not header then return 0 end
+    local headerBottom = header:GetBottom()
+    local cardBottom = card:GetBottom()
+    if headerBottom and cardBottom then
+        return math.max(80, headerBottom - cardBottom - L.PAD)
+    end
+    return math.max(80, (card:GetHeight() or 0) - 120)
+end
+
+local function RelayoutCollectionScroll()
+    if not missingScroll then return end
+    local card = missingScroll._layoutCard or missingCollectionCard
+    local header = missingScroll._layoutHeader or missingColumnHeader
+    if not card or not header then return end
+
+    local scrollH = ComputeCollectionScrollHeight()
+    missingScroll:ClearAllPoints()
+    missingScroll:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -4)
+    missingScroll:SetPoint("TOPRIGHT", card, "TOPRIGHT", -L.PAD - 10, 0)
+    if scrollH > 0 then
+        missingScroll:SetHeight(scrollH)
+    end
+
+    if missingBar then
+        missingBar:ClearAllPoints()
+        missingBar:SetPoint("TOPLEFT", missingScroll, "TOPRIGHT", -2, -4)
+        missingBar:SetPoint("BOTTOMLEFT", missingScroll, "BOTTOMRIGHT", -2, 4)
+    end
+end
+
+local function RefreshCollectionLayout()
+    if not missingScroll or not missingChild or not missingBar then return end
+    if not missingScroll:IsShown() then return end
+
+    RelayoutCollectionScroll()
+
+    local viewH = missingScroll:GetHeight() or 0
+    local expectedH = ComputeCollectionScrollHeight()
+    if expectedH > 100 and viewH < expectedH * 0.85 then
+        collectionLayoutPass = collectionLayoutPass + 1
+        if collectionLayoutPass <= 6 and C_Timer and C_Timer.After then
+            C_Timer.After(0, RefreshCollectionLayout)
+            if collectionLayoutPass <= 2 then
+                C_Timer.After(0.05, RefreshCollectionLayout)
+            end
+        end
+        return
+    end
+
+    collectionLayoutPass = 0
+    SW.ScheduleVerticalScroll(missingScroll, missingChild, missingBar)
+    if missingScroll._savedScrollValue then
+        local overflow = math.max(0, (missingChild:GetHeight() or 0) - (missingScroll:GetHeight() or 0))
+        local v = math.min(missingScroll._savedScrollValue, overflow)
+        if v > 0 and math.abs((missingBar:GetValue() or 0) - v) > 0.01 then
+            missingBar:SetValue(v)
+        end
+        missingScroll._savedScrollValue = nil
+    end
+    if RefreshMissingVisibleRows then
+        RefreshMissingVisibleRows()
+    end
+end
+
+local COLLECTION_QUALITY_NAMES = {
+    [0] = "Common", [1] = "Uncommon", [2] = "Rare", [3] = "Epic", [4] = "Legendary",
+}
+
+local function SortedQualities(qualities)
+    local list = {}
+    for q in pairs(qualities or {}) do
+        list[#list + 1] = q
+    end
+    table.sort(list)
+    return list
+end
+
+local function QualityCount(qualities)
+    local n = 0
+    for _ in pairs(qualities or {}) do n = n + 1 end
+    return n
+end
+
+local function ExpandMissingDisplayRows(entries)
+    local expanded = {}
+    for _, entry in ipairs(entries) do
+        local qs = SortedQualities(entry.qualities)
+        if #qs <= 1 then
+            expanded[#expanded + 1] = { kind = "single", entry = entry, quality = qs[1] or entry.quality }
+        else
+            expanded[#expanded + 1] = { kind = "header", entry = entry }
+            for _, q in ipairs(qs) do
+                expanded[#expanded + 1] = { kind = "sub", entry = entry, quality = q }
+            end
+        end
+    end
+    return expanded
+end
+
+local function ComputeMissingDisplayRowHeight(display)
+    if display.kind == "sub" then return MISS_SUB_ROW_H end
+    return MISS_MAIN_ROW_H
+end
+
+local function ScoreEntryQuality(entry, quality)
+    local build = state.build
+    if not build then return 0 end
+    local spellId = entry.spellIds and entry.spellIds[quality] or entry.spellId
+    local data = spellId and ProjectEbonhold.PerkDatabase[spellId]
+    local settings = build.settings or EbonBuilds.Build.DefaultSettings()
+    local weights = GetBuildWeights(build)
+    local scoringEntry = {
+        spellId = spellId,
+        name = entry.name,
+        quality = quality,
+        families = data and data.families,
+        classMask = data and data.classMask,
+    }
+    local baseWeight = EbonBuilds.Scoring.LookupWeight(weights, entry.name, quality)
+    return EbonBuilds.Scoring.EffectiveWeight(scoringEntry, baseWeight, settings, quality)
+end
+
+local function AttachMissingWeightBox(row, echoName, quality)
+    if not row._weightContainer then
+        row._weightContainer = CreateFrame("Frame", nil, row)
+        MissAnchorRight(row._weightContainer, row, MISS_INSET_BASE_WEIGHT, MISS_COL_BASE_WEIGHT)
+        row._weightContainer:SetPoint("TOP", row, "TOP", 4, 0)
+        row._weightContainer:SetPoint("BOTTOM", row, "BOTTOM", -4, 0)
+        SW.Fill(row._weightContainer, "elementBg")
+        row._weightContainer._border = SW.ThinBorder(row._weightContainer, "border", 1)
+        local edit = CreateFrame("EditBox", nil, row._weightContainer)
+        edit:SetPoint("LEFT", row._weightContainer, "LEFT", 4, 0)
+        edit:SetPoint("RIGHT", row._weightContainer, "RIGHT", -4, 0)
+        edit:SetHeight(18)
+        edit:SetFont(ST.FONT.regular, 11, "")
+        edit:SetTextColor(unpack(C.text))
+        edit:SetJustifyH("CENTER")
+        edit:SetAutoFocus(false)
+        edit:SetMaxLetters(3)
+        row._weightEdit = edit
+        if EbonBuilds.EchoTableRows.WireWeightEditBox then
+            EbonBuilds.EchoTableRows.WireWeightEditBox(edit)
+        end
+        local prevLost = edit:GetScript("OnEditFocusLost")
+        edit:SetScript("OnEditFocusLost", function(self)
+            if prevLost then prevLost(self) end
+            RefreshMissing()
+        end)
+        local prevEnter = edit:GetScript("OnEnterPressed")
+        edit:SetScript("OnEnterPressed", function(self)
+            if prevEnter then prevEnter(self) end
+            RefreshMissing()
+        end)
+    end
+    if row._labelBaseWeight then row._labelBaseWeight:Hide() end
+    local edit = row._weightEdit
+    edit.echoName = echoName
+    edit.echoQuality = quality
+    edit._row = row
+    if quality ~= nil then
+        if EbonBuilds.Weights.HasQualityOverride(echoName, quality) then
+            edit:SetText(tostring(EbonBuilds.Weights.GetForQuality(echoName, quality)))
+        else
+            edit:SetText("")
+        end
+    else
+        edit:SetText(tostring(EbonBuilds.Weights.Get(echoName)))
+    end
+    row._weightContainer:Show()
+end
+
+local function CreateMissingSubRow(parent)
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetHeight(22)
+    row._bg = SW.Fill(row, "tierRowBg")
+
+    local dot = SW.Label(row, "·", 11, C.textMuted)
+    dot:SetPoint("LEFT", row, "LEFT", MISS_NAME_LEFT - 10, 0)
+
+    row._qualLabel = SW.Label(row, "", 10, C.text)
+    row._qualLabel:SetPoint("LEFT", dot, "RIGHT", 4, 0)
+    row._qualLabel:SetWidth(78)
+
+    row._labelScore = SW.Label(row, "", 10, C.textMuted)
+    MissAnchorRight(row._labelScore, row, MISS_INSET_SCORE, MISS_COL_SCORE)
+    row._labelScore:SetJustifyH("RIGHT")
+
+    row:Hide()
+    return row
+end
+
+local function EnsureMissingMainRow(index)
+    while #missingRows < index do
+        local n = #missingRows + 1
+        local btn = CreateFrame("Button", nil, missingChild)
+        btn:SetHeight(26)
+        btn:RegisterForClicks("LeftButtonUp")
+        local icon = btn:CreateTexture(nil, "ARTWORK")
+        icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        btn._icon = icon
+        local labelName = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        btn._labelName = labelName
+        local labelSource = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        labelSource:SetTextColor(0.6, 0.6, 0.6, 1)
+        if labelSource.SetWordWrap then labelSource:SetWordWrap(false) end
+        if labelSource.SetMaxLines then labelSource:SetMaxLines(1) end
+        btn._labelSource = labelSource
+        local labelBaseWeight = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        btn._labelBaseWeight = labelBaseWeight
+        local labelScore = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        btn._labelScore = labelScore
+        LayoutMissingRow(btn)
+        missingRows[n] = btn
+    end
+    return missingRows[index]
+end
+
+local function PopulateMissingMainRow(btn, display, yPos)
+    local entry = display.entry
+    if btn._labelWeight then btn._labelWeight:Hide() end
+    LayoutMissingRow(btn)
+    local q = display.quality or entry.quality
+    local spellId = entry.spellIds and entry.spellIds[q] or entry.spellId
+    btn._spellId = spellId
+    btn._icon:SetTexture(select(3, GetSpellInfo(spellId)))
+    local cc = QUALITY_COLORS[q] or QUALITY_COLORS[0]
+    btn._labelName:SetText(entry.name)
+    btn._labelName:SetTextColor(cc[1], cc[2], cc[3], 1)
+    local cleanSource = (entry.dropSource or ""):gsub("^Can be found on ", "")
+    btn._sourceText = cleanSource
+    btn._labelSource:SetText(cleanSource)
+    if display.kind == "header" then
+        btn._labelScore:SetText("")
+        AttachMissingWeightBox(btn, entry.name, nil)
+    else
+        btn._labelScore:SetText(string.format("%.0f", ScoreEntryQuality(entry, q)))
+        AttachMissingWeightBox(btn, entry.name, nil)
+    end
+    if EbonBuilds.EchoTableRows.SyncTomeOwnedDisplay then
+        EbonBuilds.EchoTableRows.SyncTomeOwnedDisplay(btn._tomeOwned, {
+            name = entry.name,
+            spellId = spellId,
+            groupId = entry.groupId,
+            tomeSpellId = entry.tomeSpellId,
+            owned = entry.owned,
+        })
+    end
+    if btn._rolledDisplay then
+        btn._rolledDisplay._isRolled = entry.rolled
+        SyncRolledDisplay(btn._rolledDisplay, entry.rolled)
+    end
+    local rowH = display._rowH or MISS_MAIN_ROW_H
+    btn:SetHeight(rowH)
+    btn:ClearAllPoints()
+    btn:SetPoint("TOPLEFT", missingChild, "TOPLEFT", 0, -yPos)
+    btn:SetPoint("RIGHT", missingChild, "RIGHT", 0, 0)
+    btn:Show()
+    if missingWireWheel then
+        missingWireWheel(btn)
+        if btn._tomeOwned then missingWireWheel(btn._tomeOwned) end
+        if btn._rolledDisplay then missingWireWheel(btn._rolledDisplay) end
+    end
+end
+
+local function PopulateMissingSubRow(sub, display, yPos)
+    local entry = display.entry
+    local q = display.quality
+    local qColor = QUALITY_COLORS[q] or QUALITY_COLORS[0]
+    local qName = COLLECTION_QUALITY_NAMES[q] or ("Q" .. tostring(q))
+    sub._qualLabel:SetText(qName)
+    sub._qualLabel:SetTextColor(qColor[1], qColor[2], qColor[3], 1)
+    sub._labelScore:SetText(string.format("%.0f", ScoreEntryQuality(entry, q)))
+    AttachMissingWeightBox(sub, entry.name, q)
+    sub:ClearAllPoints()
+    sub:SetPoint("TOPLEFT", missingChild, "TOPLEFT", 0, -yPos)
+    sub:SetPoint("RIGHT", missingChild, "RIGHT", 0, 0)
+    sub:SetHeight(MISS_SUB_ROW_H)
+    sub:Show()
+    if missingWireWheel then missingWireWheel(sub) end
+end
+
+local function RebuildMissingRowLayout(displayRows)
+    missingDisplayRows = displayRows
+    missingDisplayCount = #displayRows
+    local currY = 0
+    for i = 1, missingDisplayCount do
+        local display = displayRows[i]
+        display._rowH = ComputeMissingDisplayRowHeight(display)
+        missingRowOffsetY[i] = currY
+        currY = currY + display._rowH
+        if display.kind ~= "sub" then
+            currY = currY + 2
+        end
+    end
+    missingChild:SetHeight(math.max(1, currY))
+    SW.UpdateVerticalScroll(missingScroll, missingChild, missingBar)
+end
+
+LayoutAllMissingRows = function()
+    if not missingChild or missingDisplayCount == 0 then return end
+
+    local mainIdx = 0
+    local subIdx = 0
+
+    for i = 1, missingDisplayCount do
+        local yTop = missingRowOffsetY[i] or 0
+        local display = missingDisplayRows[i]
+        if display.kind == "sub" then
+            subIdx = subIdx + 1
+            while #missingSubRows < subIdx do
+                missingSubRows[#missingSubRows + 1] = CreateMissingSubRow(missingChild)
+            end
+            PopulateMissingSubRow(missingSubRows[subIdx], display, yTop)
+        else
+            mainIdx = mainIdx + 1
+            PopulateMissingMainRow(EnsureMissingMainRow(mainIdx), display, yTop)
+        end
+    end
+
+    for i = mainIdx + 1, #missingRows do
+        missingRows[i]:Hide()
+    end
+    for i = subIdx + 1, #missingSubRows do
+        missingSubRows[i]:Hide()
+    end
+end
+
+RefreshMissingVisibleRows = function()
+    if not missingChild or missingDisplayCount == 0 then return end
+    for _, btn in ipairs(missingRows) do btn:Hide() end
+    for _, row in ipairs(missingSubRows) do row:Hide() end
+
+    local scrollY = (missingBar and missingBar:GetValue()) or 0
+    local viewH = (missingScroll and missingScroll:GetHeight()) or 0
+    local mainIdx = 0
+    local subIdx = 0
+
+    for i = 1, missingDisplayCount do
+        local yTop = missingRowOffsetY[i] or 0
+        local rowH = missingDisplayRows[i]._rowH or 26
+        if yTop + rowH < scrollY - 200 then
+            -- above viewport
+        elseif yTop > scrollY + viewH + 200 then
+            break
+        else
+            local yPos = yTop - scrollY
+            local display = missingDisplayRows[i]
+            if display.kind == "sub" then
+                subIdx = subIdx + 1
+                while #missingSubRows < subIdx do
+                    missingSubRows[#missingSubRows + 1] = CreateMissingSubRow(missingChild)
+                end
+                PopulateMissingSubRow(missingSubRows[subIdx], display, yPos)
+            else
+                mainIdx = mainIdx + 1
+                PopulateMissingMainRow(EnsureMissingMainRow(mainIdx), display, yPos)
+            end
+        end
+    end
+end
+
+local function ResolveDisplaySpec(build)
+    local classToken = build.class
+    local specIdx = build.spec or 1
+    if type(specIdx) ~= "number" then
+        specIdx = ST.SpecIndex(classToken, specIdx)
+    end
+
+    local active = EbonBuilds.Build and EbonBuilds.Build.GetActive and EbonBuilds.Build.GetActive()
+    if active and active.id == build.id then
+        local playerClass = EbonBuilds.Build.PlayerClassToken and EbonBuilds.Build.PlayerClassToken()
+        if playerClass and classToken == playerClass then
+            specIdx = EbonBuilds.Build.PlayerTopTalentTab()
+        end
+    end
+
+    local specName = ST.SpecDisplay(classToken, specIdx)
+    return specIdx, specName
+end
 
 local function RefreshOverview()
     local build = state.build
     if not build then return end
     local cc = CLASS_COLORS[build.class] or { 0.5, 0.5, 0.5 }
 
-    SetClassIcon(overviewOuter._classIcon, build.class)
-    overviewOuter._nameLabel:SetText(build.title or "Untitled")
-    overviewOuter._nameLabel:SetTextColor(cc[1], cc[2], cc[3], 1)
+    if buildHeader then
+        buildHeader._title:SetText(build.title or "Untitled")
+        buildHeader._title:SetTextColor(cc[1], cc[2], cc[3], 1)
+        local specIdx, specName = ResolveDisplaySpec(build)
+        if buildHeader.SetClass then
+            buildHeader:SetClass(build.class, specIdx)
+        end
+        if buildHeader._subtitle then
+            buildHeader._subtitle:SetText(string.format("by %s\n%s · %s",
+                build.author or "Unknown",
+                specName,
+                build.lastModified or ""))
+        end
+    end
 
-    local specs = EbonBuilds.SpecData and EbonBuilds.SpecData[build.class]
-    local specName = specs and specs[build.spec or 1] and specs[build.spec or 1].name or ""
-    overviewOuter._metaLabel:SetText(string.format("by %s | %s | %s",
-        build.author or "Unknown",
-        specName,
-        build.lastModified or ""))
+    if sidebarFrame and sidebarFrame._autoToggle then
+        local label = build.automationEnabled and "Automation: ON" or "Automation: OFF"
+        sidebarFrame._autoToggle._label:SetText(label)
+    end
 
-    overviewOuter._autoToggle:SetText(build.automationEnabled and "Automation: ON" or "Automation: OFF")
+    if sidebarFrame and EbonBuilds.Build.EnsureStats then
+        EbonBuilds.Build.EnsureStats(build)
+        local st = build.stats or {}
+        if sidebarFrame._runsCell and sidebarFrame._runsCell._valueLabel then
+            sidebarFrame._runsCell._valueLabel:SetText(tostring(st.runsCompleted or 0))
+        end
+        if sidebarFrame._picksCell and sidebarFrame._picksCell._valueLabel then
+            sidebarFrame._picksCell._valueLabel:SetText(tostring(st.picks or 0))
+        end
+    end
 
-    local desc = build.comments or ""
-    overviewDescSmf:Clear()
-    overviewDescSmf:AddMessage(desc, 0.8, 0.8, 0.8, 1.0)
-    overviewDescMeasure:SetText(desc)
+    if overviewOuter and overviewOuter._syncDescWidth then
+        overviewOuter._syncDescWidth()
+    end
 
+    local comments = build.comments or ""
+    local hasDesc = comments ~= "" and comments:match("%S")
+
+    if hasDesc then
+        if overviewDescPlaceholder then overviewDescPlaceholder:Hide() end
+        if overviewDescSmf then
+            overviewDescSmf:Show()
+            overviewDescSmf:Clear()
+            overviewDescSmf:AddMessage(comments, 0.8, 0.8, 0.8, 1.0)
+        end
+        overviewDescMeasure:SetText(comments)
+    else
+        if overviewDescSmf then
+            overviewDescSmf:Clear()
+            overviewDescSmf:Hide()
+        end
+        if overviewDescPlaceholder then
+            overviewDescPlaceholder:SetText(DESC_PLACEHOLDER)
+            overviewDescPlaceholder:Show()
+        end
+        overviewDescMeasure:SetText(DESC_PLACEHOLDER)
+    end
+
+    if overviewDescBar then
+        overviewDescBar:SetValue(0)
+    end
+    if overviewDescChild and overviewDescScroll then
+        overviewDescChild:SetPoint("TOPLEFT", overviewDescScroll, "TOPLEFT", 0, 0)
+    end
+
+    local lockedButtons = sidebarFrame and sidebarFrame._lockedButtons or {}
     local slotCount = (EbonBuilds.Build and EbonBuilds.Build.GetLockedSlotCount and EbonBuilds.Build.GetLockedSlotCount()) or 5
-    for i = 1, #overviewOuter._lockedButtons do
-        local btn = overviewOuter._lockedButtons[i]
+    for i = 1, #lockedButtons do
+        local btn = lockedButtons[i]
         if i > slotCount then
             btn._icon:SetTexture("Interface\\Buttons\\UI-EmptySlot")
             btn._spellId = nil
@@ -1396,11 +1733,15 @@ local function RefreshOverview()
         end
     end
 
-    -- Adjust description scroll range
     local textHeight = overviewDescMeasure:GetStringHeight() or 0
+    if not hasDesc and overviewDescPlaceholder then
+        textHeight = overviewDescPlaceholder:GetStringHeight() or textHeight
+    end
     overviewDescSmf:SetHeight(math.max(textHeight + 4, 14))
-    overviewDescChild:SetHeight(math.max(textHeight + 6, overviewDescScroll:GetHeight()))
-    overviewDescBar:SetMinMaxValues(0, math.max(0, overviewDescChild:GetHeight() - overviewDescScroll:GetHeight()))
+    overviewDescChild:SetHeight(math.max(textHeight + 6, 14))
+    if overviewOuter and overviewOuter._syncDescWidth then
+        overviewOuter._syncDescWidth()
+    end
 end
 
 local function RefreshStats()
@@ -1425,10 +1766,10 @@ local function RefreshStats()
     end
     local topPicked = EbonBuilds.Build.TopEchoStatName and EbonBuilds.Build.TopEchoStatName(st.mostPicked)
         or nil
-    statsValueLabels.mostPicked:SetText(topPicked or "-")
+    SetEchoStatLabel(statsValueLabels.mostPicked, topPicked)
     local topBanned = EbonBuilds.Build.TopEchoStatName and EbonBuilds.Build.TopEchoStatName(st.mostBanned)
         or nil
-    statsValueLabels.mostBanned:SetText(topBanned or "-")
+    SetEchoStatLabel(statsValueLabels.mostBanned, topBanned)
 end
 
 function EbonBuilds.BuildOverview.NotifyStatsChanged()
@@ -1437,19 +1778,23 @@ function EbonBuilds.BuildOverview.NotifyStatsChanged()
     end
 end
 
-RefreshMissing = function()
+RefreshMissing = function(forceCatalog)
     local build = state.build
     if not build or not missingChild then return end
     for _, btn in ipairs(missingRows) do btn:Hide() end
-    local missing = ComputeMissingEchoes(build, {
-        showAllClasses = missingShowAllClasses,
-    })
+    if forceCatalog then
+        InvalidateMissingCatalog()
+    end
+    local missing = GetMissingCatalog(build)
     if missing == nil then
         missingChild.loadingLabel = missingChild.loadingLabel or missingChild:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         missingChild.loadingLabel:SetPoint("TOPLEFT", missingChild, "TOPLEFT", 4, -2)
         missingChild.loadingLabel:SetText("Requesting data...")
         missingChild.loadingLabel:Show()
         missingChild:SetHeight(20)
+        missingDisplayCount = 0
+        SW.UpdateVerticalScroll(missingScroll, missingChild, missingBar)
+        RefreshMissingVisibleRows()
         return
     end
     if missingChild.loadingLabel then
@@ -1485,74 +1830,19 @@ RefreshMissing = function()
         end
         missingChild.noMatchLabel:Show()
         missingChild:SetHeight(20)
-        missingBar:SetMinMaxValues(0, 0)
+        missingDisplayCount = 0
+        SW.UpdateVerticalScroll(missingScroll, missingChild, missingBar)
+        RefreshMissingVisibleRows()
         return
     end
 
-    local currY = 0
-    for i, entry in ipairs(filtered) do
-        local rowIdx = i
-        while #missingRows < rowIdx do
-            local n = #missingRows + 1
-            local btn = CreateFrame("Button", nil, missingChild)
-            btn:SetHeight(26)
-            btn:RegisterForClicks("LeftButtonUp")
-            local icon = btn:CreateTexture(nil, "ARTWORK")
-            icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-            btn._icon = icon
-            local labelName = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            btn._labelName = labelName
-            local labelSource = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            labelSource:SetTextColor(0.6, 0.6, 0.6, 1)
-            btn._labelSource = labelSource
-            local labelBaseWeight = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            btn._labelBaseWeight = labelBaseWeight
-            local labelScore = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            btn._labelScore = labelScore
-            LayoutMissingRow(btn)
-            missingRows[n] = btn
-        end
-        local btn = missingRows[rowIdx]
-        if btn._labelWeight then btn._labelWeight:Hide() end
-        LayoutMissingRow(btn)
-        btn._spellId = entry.spellId
-        btn._icon:SetTexture(select(3, GetSpellInfo(entry.spellId)))
-        local cc = QUALITY_COLORS[entry.quality] or QUALITY_COLORS[0]
-        btn._labelName:SetText(entry.name)
-        btn._labelName:SetTextColor(cc[1], cc[2], cc[3], 1)
-        local cleanSource = (entry.dropSource or ""):gsub("^Can be found on ", "")
-        btn._sourceText = cleanSource
-        btn._labelSource:SetText(cleanSource)
-        btn._labelBaseWeight:SetText(tostring(entry.baseWeight or 0))
-        btn._labelScore:SetText(string.format("%.0f", entry.score))
-        if EbonBuilds.EchoTableRows.SyncTomeOwnedDisplay then
-            EbonBuilds.EchoTableRows.SyncTomeOwnedDisplay(btn._tomeOwned, {
-                name = entry.name,
-                spellId = entry.spellId,
-                groupId = entry.groupId,
-                tomeSpellId = entry.tomeSpellId,
-                owned = entry.owned,
-            })
-        end
-        if btn._rolledDisplay then
-            btn._rolledDisplay._isRolled = entry.rolled
-            SyncRolledDisplay(btn._rolledDisplay, entry.rolled)
-        end
-        local srcH = btn._labelSource:GetStringHeight() or 16
-        local rowH = math.max(26, srcH + 4)
-        btn:SetHeight(rowH)
-        btn:SetPoint("TOPLEFT", missingChild, "TOPLEFT", 0, -currY)
-        btn:SetPoint("RIGHT", missingChild, "RIGHT", 0, 0)
-        btn:Show()
-        if missingWireWheel then
-            missingWireWheel(btn)
-            if btn._tomeOwned then missingWireWheel(btn._tomeOwned) end
-            if btn._rolledDisplay then missingWireWheel(btn._rolledDisplay) end
-        end
-        currY = currY + rowH + 2
-    end
-    missingChild:SetHeight(math.max(1, currY))
-    missingBar:SetMinMaxValues(0, math.max(0, missingChild:GetHeight() - missingScroll:GetHeight()))
+    for _, btn in ipairs(missingRows) do btn:Hide() end
+    for _, row in ipairs(missingSubRows) do row:Hide() end
+
+    local displayRows = ExpandMissingDisplayRows(filtered)
+    RebuildMissingRowLayout(displayRows)
+    RefreshMissingVisibleRows()
+    RefreshCollectionLayout()
 end
 
 ------------------------------------------------------------------------
@@ -1679,18 +1969,17 @@ local function LayoutBanishRowLabels(btn, row)
 end
 
 local function BuildBanishTab(parent)
-    local outer = CreateFrame("Frame", nil, parent)
-    outer:SetAllPoints(parent)
+    local card = SW.WrapContentCard(parent, L.PAD)
+    local outer = card
 
-    local hint = outer:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    hint:SetPoint("TOPLEFT", outer, "TOPLEFT", 10, -8)
-    hint:SetPoint("RIGHT", outer, "RIGHT", -10, 0)
+    local hint = SW.Label(outer, "Echoes with banish or ignore automation policies. Change policy here or in the Echoes tab.", 11, C.textDim)
+    hint:SetPoint("TOPLEFT", outer, "TOPLEFT", L.PAD, -L.PAD)
+    hint:SetPoint("TOPRIGHT", outer, "TOPRIGHT", -L.PAD, -L.PAD)
     hint:SetJustifyH("LEFT")
-    hint:SetText("Echoes with banish or ignore automation policies. Change policy here or in the Echoes tab.")
 
     local listArea = CreateFrame("Frame", nil, outer)
-    listArea:SetPoint("TOPLEFT", hint, "BOTTOMLEFT", 0, -8)
-    listArea:SetPoint("BOTTOMRIGHT", outer, "BOTTOMRIGHT", -4, 4)
+    listArea:SetPoint("TOPLEFT", hint, "BOTTOMLEFT", 0, -10)
+    listArea:SetPoint("BOTTOMRIGHT", outer, "BOTTOMRIGHT", -L.PAD, L.PAD)
 
     local headerRow = CreateFrame("Frame", nil, listArea)
     headerRow:SetPoint("TOPLEFT", listArea, "TOPLEFT", 0, 0)
@@ -1736,7 +2025,7 @@ RefreshBanish = function()
         banishChild.emptyLabel:SetText("No banish or deprioritize policies configured — set them in the Echoes tab Policy column.")
         banishChild.emptyLabel:Show()
         banishChild:SetHeight(20)
-        if banishBar then banishBar:SetMinMaxValues(0, 0) end
+        if banishBar then SW.ScheduleVerticalScroll(banishScroll, banishChild, banishBar) end
         return
     end
 
@@ -1771,7 +2060,13 @@ RefreshBanish = function()
                     EbonBuilds.EchoTableRows.ShowEchoTooltip(self, self._spellId)
                 end
             end)
-            btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            btn:SetScript("OnLeave", function()
+                if EbonBuilds.EchoTableRows and EbonBuilds.EchoTableRows.HideEchoTooltip then
+                    EbonBuilds.EchoTableRows.HideEchoTooltip()
+                else
+                    GameTooltip:Hide()
+                end
+            end)
             banishRows[n] = btn
         end
         local btn = banishRows[rowIdx]
@@ -1803,7 +2098,7 @@ RefreshBanish = function()
     end
     banishChild:SetHeight(math.max(1, currY))
     if banishBar then
-        banishBar:SetMinMaxValues(0, math.max(0, banishChild:GetHeight() - banishScroll:GetHeight()))
+        SW.ScheduleVerticalScroll(banishScroll, banishChild, banishBar)
     end
 end
 
@@ -1816,38 +2111,187 @@ local function BuildLogbookTab(parent)
 end
 
 ------------------------------------------------------------------------
+-- Sidebar (build identity + quick actions)
+------------------------------------------------------------------------
+
+local function BuildSidebar(parent)
+    local sidebar = CreateFrame("Frame", nil, parent)
+    sidebar:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
+    sidebar:SetPoint("BOTTOMRIGHT", parent, "BOTTOMLEFT", L.SIDEBAR_W, 0)
+    SW.FillChrome(sidebar, "sidebarBg")
+
+    local footer = CreateFrame("Frame", nil, sidebar)
+    footer:SetPoint("BOTTOMLEFT", sidebar, "BOTTOMLEFT", 0, 0)
+    footer:SetPoint("BOTTOMRIGHT", sidebar, "BOTTOMRIGHT", 0, 0)
+    footer:SetHeight(L.PAD + 28 + L.PAD)
+    footer:SetFrameLevel(sidebar:GetFrameLevel() + 4)
+    SW.FillChrome(footer, "sidebarBg")
+
+    local backBtn = SW.CreateOutlineButton(footer, "< Builds", 0)
+    backBtn:SetPoint("LEFT", footer, "LEFT", L.PAD, 0)
+    backBtn:SetPoint("RIGHT", footer, "RIGHT", -L.PAD, 0)
+    backBtn:SetHeight(28)
+    backBtn:SetPoint("BOTTOM", footer, "BOTTOM", 0, L.PAD)
+    backBtn:SetScript("OnClick", function()
+        if EbonBuilds.MainWindow and EbonBuilds.MainWindow.ExpandBuildList then
+            EbonBuilds.MainWindow.ExpandBuildList()
+        end
+    end)
+    sidebar._footer = footer
+    sidebar._backBtn = backBtn
+
+    buildHeader = SW.CreateBuildHeader(sidebar, {
+        height   = 132,
+        class    = "MAGE",
+        title    = "Untitled",
+        subtitle = "",
+    })
+    buildHeader:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 0, 0)
+    buildHeader:SetPoint("TOPRIGHT", sidebar, "TOPRIGHT", 0, 0)
+
+    local lockedBlock = SW.CreateSidebarBlock(sidebar, "Locked echoes")
+    lockedBlock:SetPoint("TOPLEFT", buildHeader, "BOTTOMLEFT", 0, -4)
+    lockedBlock:SetHeight(72)
+
+    local lockedRow = CreateFrame("Frame", nil, lockedBlock)
+    lockedRow:SetPoint("TOPLEFT", lockedBlock, "TOPLEFT", L.PAD, lockedBlock._contentTop)
+    lockedRow:SetPoint("RIGHT", lockedBlock, "RIGHT", -L.PAD, 0)
+    lockedRow:SetHeight(L.ICON_LOCKED)
+
+    local lockedButtons = {}
+    local maxSlots = (EbonBuilds.Build and EbonBuilds.Build.MAX_LOCKED_SLOTS) or 6
+    for i = 1, maxSlots do
+        local btn = CreateIconButton(lockedRow, L.ICON_LOCKED - 4)
+        btn:SetPoint("LEFT", lockedRow, "LEFT", (i - 1) * (L.ICON_LOCKED + 2), 0)
+        local border = btn:CreateTexture(nil, "BORDER")
+        border:SetPoint("TOPLEFT",     btn, "TOPLEFT",     -2,  2)
+        border:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT",  2, -2)
+        border:Hide()
+        btn._border = border
+        btn:SetScript("OnEnter", function(self)
+            if not self._spellId then return end
+            local name = GetSpellInfo(self._spellId)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:ClearLines()
+            if name then GameTooltip:AddLine(name, 1, 0.82, 0) end
+            GameTooltip:Show()
+        end)
+        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        lockedButtons[i] = btn
+    end
+    sidebar._lockedButtons = lockedButtons
+
+    local actionsBlock = SW.CreateSidebarBlock(sidebar, "Actions")
+    actionsBlock:SetPoint("TOPLEFT", lockedBlock, "BOTTOMLEFT", 0, -4)
+    actionsBlock:SetHeight(88)
+
+    local autoToggle = SW.CreateAccentButton(actionsBlock, "Automation: ON", function(self)
+        local build = state.build
+        if not build then return end
+        local active = EbonBuilds.Build.GetActive()
+        if active and active.id ~= build.id then
+            DEFAULT_CHAT_FRAME:AddMessage(
+                "|cffffcc00[EbonBuilds] Activate this build to change automation.|r")
+            return
+        end
+        local enabled = not build.automationEnabled
+        build.automationEnabled = enabled
+        if EbonBuilds.Automation.SetEnabled then
+            EbonBuilds.Automation.SetEnabled(enabled)
+        end
+        self._label:SetText(enabled and "Automation: ON" or "Automation: OFF")
+    end)
+    autoToggle:SetSize(L.SIDEBAR_W - L.PAD * 2, 28)
+    autoToggle:SetPoint("TOPLEFT", actionsBlock, "TOPLEFT", L.PAD, actionsBlock._contentTop)
+
+    local actionW = L.SIDEBAR_W - L.PAD * 2
+    local halfW = math.floor((actionW - 6) / 2)
+
+    local editBtn = SW.CreateOutlineButton(actionsBlock, "Edit Build", halfW)
+    editBtn:SetSize(halfW, 28)
+    editBtn:SetPoint("TOPLEFT", autoToggle, "BOTTOMLEFT", 0, -8)
+    editBtn:SetScript("OnClick", function()
+        if state.build then
+            EbonBuilds.ViewRouter.Show("buildTabs", { mode = "edit", build = state.build })
+        end
+    end)
+
+    local echoJournalBtn = SW.CreateOutlineButton(actionsBlock, "Echo Journal", halfW)
+    echoJournalBtn:SetSize(halfW, 28)
+    echoJournalBtn:SetPoint("LEFT", editBtn, "RIGHT", 6, 0)
+    echoJournalBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Echo Journal", 1, 0.82, 0)
+        GameTooltip:AddLine("Opens the native /echoes browser.", 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    echoJournalBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    echoJournalBtn:SetScript("OnClick", function()
+        if EbonBuilds.OpenEchoJournal then
+            EbonBuilds.OpenEchoJournal()
+        end
+    end)
+
+    sidebar._autoToggle = autoToggle
+
+    local statsBlock = SW.CreateSidebarBlock(sidebar, "Quick stats")
+    statsBlock:SetPoint("TOPLEFT", actionsBlock, "BOTTOMLEFT", 0, -4)
+    statsBlock:SetPoint("BOTTOM", footer, "TOP", 0, -4)
+
+    local statsInnerW = L.SIDEBAR_W - L.PAD * 2
+    local cellGap = 6
+    local cellW = math.floor((statsInnerW - cellGap) / 2)
+
+    local runsCell = SW.CreateStatCell(statsBlock, "Runs", "0")
+    runsCell:SetSize(cellW, 44)
+    runsCell:SetPoint("TOPLEFT", statsBlock, "TOPLEFT", L.PAD, statsBlock._contentTop)
+    sidebar._runsCell = runsCell
+
+    local picksCell = SW.CreateStatCell(statsBlock, "Picks", "0")
+    picksCell:SetSize(cellW, 44)
+    picksCell:SetPoint("TOPLEFT", runsCell, "TOPRIGHT", cellGap, 0)
+    sidebar._picksCell = picksCell
+
+    return sidebar
+end
+
+------------------------------------------------------------------------
 -- BuildViewFrame
 ------------------------------------------------------------------------
 
 local switchOverview, switchStats, switchMissing, switchBanish, switchLogbook, switchAffixes
 local affixParent
-local missingParent
 
 local function BuildViewFrame()
     local f = CreateFrame("Frame", "EbonBuildsBuildOverview", UIParent)
+    SW.FillChrome(f, "bg")
 
-    -- Bordered container
-    local box = CreateFrame("Frame", nil, f)
-    box:SetPoint("TOPLEFT",     f, "TOPLEFT",     0, -24)
-    box:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0,  10)
-    box:SetBackdrop({
-        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile     = true,
-        tileSize = 16,
-        edgeSize = 16,
-        insets   = { left = 4, right = 4, top = 4, bottom = 4 },
-    })
-    box:SetBackdropColor(0, 0, 0, 0.6)
-    box:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+    sidebarFrame = BuildSidebar(f)
 
-    -- Inner content area
-    contentArea = CreateFrame("Frame", nil, box)
-    contentArea:SetPoint("TOPLEFT",     box, "TOPLEFT",     6, -6)
-    contentArea:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -6,  6)
+    local mainCol = CreateFrame("Frame", nil, f)
+    mainCol:SetPoint("TOPLEFT", sidebarFrame, "TOPRIGHT", 0, 0)
+    mainCol:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
+    SW.FillChrome(mainCol, "mainBg")
 
-    -- Build Overview tab content
+    tabBarFrame = CreateFrame("Frame", nil, mainCol)
+    tabBarFrame:SetPoint("TOPLEFT", mainCol, "TOPLEFT", 0, 0)
+    tabBarFrame:SetPoint("TOPRIGHT", mainCol, "TOPRIGHT", 0, 0)
+    tabBarFrame:SetHeight(40)
+    SW.FillChrome(tabBarFrame, "tabBarBg")
+
+    local tabSep = tabBarFrame:CreateTexture(nil, "ARTWORK")
+    tabSep:SetTexture(ST.FLAT)
+    tabSep:SetVertexColor(unpack(C.border))
+    tabSep:SetHeight(1)
+    tabSep:SetPoint("BOTTOMLEFT", tabBarFrame, "BOTTOMLEFT", 0, 0)
+    tabSep:SetPoint("BOTTOMRIGHT", tabBarFrame, "BOTTOMRIGHT", 0, 0)
+
+    contentArea = CreateFrame("Frame", nil, mainCol)
+    contentArea:SetPoint("TOPLEFT", tabBarFrame, "BOTTOMLEFT", 0, 0)
+    contentArea:SetPoint("BOTTOMRIGHT", mainCol, "BOTTOMRIGHT", 0, 0)
+
     overviewOuter, overviewDescSmf, overviewDescMeasure, overviewDescScroll, overviewDescChild, overviewDescBar = BuildOverviewTab(contentArea)
+    overviewDescPlaceholder = overviewOuter and overviewOuter._descPlaceholder
 
     if not EbonBuilds.BuildOverview._overviewHooksInstalled then
         EbonBuilds.BuildOverview._overviewHooksInstalled = true
@@ -1861,24 +2305,48 @@ local function BuildViewFrame()
         end
     end
 
-    -- Build Stats tab content (hidden by default)
     local statsParent = CreateFrame("Frame", nil, contentArea)
     statsParent:SetAllPoints(contentArea)
     statsParent:Hide()
     statsValueLabels, statsQualityLabels = BuildStatsTab(statsParent)
 
-    -- Echoes tab content (hidden by default)
     missingParent = CreateFrame("Frame", nil, contentArea)
     missingParent:SetAllPoints(contentArea)
     missingParent:Hide()
     missingScroll, missingChild, missingBar, missingWireWheel = BuildMissingTab(missingParent)
+    missingParent:SetScript("OnHide", function()
+        if missingBar and missingScroll then
+            missingScroll._savedScrollValue = missingBar:GetValue()
+        end
+    end)
+    missingParent:SetScript("OnShow", function()
+        collectionLayoutPass = 0
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0, RefreshCollectionLayout)
+            C_Timer.After(0.05, RefreshCollectionLayout)
+            C_Timer.After(0.15, RefreshCollectionLayout)
+        else
+            RefreshCollectionLayout()
+        end
+    end)
+    missingParent:HookScript("OnSizeChanged", function()
+        if missingScroll and missingScroll:IsShown() then
+            RefreshCollectionLayout()
+        end
+    end)
+    if missingCollectionCard then
+        missingCollectionCard:HookScript("OnSizeChanged", function()
+            if missingScroll and missingScroll:IsShown() then
+                RefreshCollectionLayout()
+            end
+        end)
+    end
 
     local banishParent = CreateFrame("Frame", nil, contentArea)
     banishParent:SetAllPoints(contentArea)
     banishParent:Hide()
     BuildBanishTab(banishParent)
 
-    -- Build Logbook tab content (hidden by default)
     local logbookParent = CreateFrame("Frame", nil, contentArea)
     logbookParent:SetAllPoints(contentArea)
     logbookParent:Hide()
@@ -1888,7 +2356,6 @@ local function BuildViewFrame()
     affixParent:SetAllPoints(contentArea)
     affixParent:Hide()
 
-    -- Hide all tab content
     local function HideAllContent()
         overviewOuter:Hide()
         statsParent:Hide()
@@ -1900,139 +2367,108 @@ local function BuildViewFrame()
         if EbonBuilds.SessionHistory and EbonBuilds.SessionHistory.HideCopyDialog then
             EbonBuilds.SessionHistory.HideCopyDialog()
         end
+        if overviewOuter and overviewOuter._updateCollectionTicker then
+            overviewOuter._updateCollectionTicker()
+        end
     end
 
-    -- Tab switching functions (defined after content so refs are valid)
+    local function SelectTabVisual(index)
+        tabState.selectedIndex = index
+        SW.UpdateTabBar(tabState)
+    end
+
     switchOverview = function()
         HideAllContent()
         overviewOuter:Show()
-        overviewOuter._deleteBtn:Show()
+        if overviewOuter._deleteBtn then overviewOuter._deleteBtn:Show() end
         activeOverviewTab = 1
-        PanelTemplates_SetTab(f, 1)
-        PanelTemplates_EnableTab(f, 2)
-        PanelTemplates_EnableTab(f, 3)
-        PanelTemplates_EnableTab(f, 4)
-        PanelTemplates_EnableTab(f, 5)
-        PanelTemplates_EnableTab(f, 6)
+        SelectTabVisual(1)
         RefreshOverview()
     end
 
     switchStats = function()
         HideAllContent()
-        overviewOuter._deleteBtn:Hide()
+        if overviewOuter._deleteBtn then overviewOuter._deleteBtn:Hide() end
         statsParent:Show()
         activeOverviewTab = 2
-        PanelTemplates_SetTab(f, 2)
-        PanelTemplates_EnableTab(f, 1)
-        PanelTemplates_EnableTab(f, 3)
-        PanelTemplates_EnableTab(f, 4)
-        PanelTemplates_EnableTab(f, 5)
-        PanelTemplates_EnableTab(f, 6)
+        SelectTabVisual(2)
         RefreshStats()
     end
 
     switchMissing = function()
         HideAllContent()
-        overviewOuter._deleteBtn:Hide()
+        if overviewOuter._deleteBtn then overviewOuter._deleteBtn:Hide() end
         missingParent:Show()
         activeOverviewTab = 3
-        PanelTemplates_SetTab(f, 3)
-        PanelTemplates_EnableTab(f, 1)
-        PanelTemplates_EnableTab(f, 2)
-        PanelTemplates_EnableTab(f, 4)
-        PanelTemplates_EnableTab(f, 5)
-        PanelTemplates_EnableTab(f, 6)
+        SelectTabVisual(3)
+        collectionLayoutPass = 0
         SyncMissingTomeFilterUI()
         RefreshMissing()
+        RefreshCollectionLayout()
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0.05, RefreshCollectionLayout)
+            C_Timer.After(0.15, RefreshCollectionLayout)
+        end
+        if overviewOuter and overviewOuter._updateCollectionTicker then
+            overviewOuter._updateCollectionTicker()
+        end
     end
 
     switchBanish = function()
         HideAllContent()
-        overviewOuter._deleteBtn:Hide()
+        if overviewOuter._deleteBtn then overviewOuter._deleteBtn:Hide() end
         banishParent:Show()
         activeOverviewTab = 4
-        PanelTemplates_SetTab(f, 4)
-        PanelTemplates_EnableTab(f, 1)
-        PanelTemplates_EnableTab(f, 2)
-        PanelTemplates_EnableTab(f, 3)
-        PanelTemplates_EnableTab(f, 5)
-        PanelTemplates_EnableTab(f, 6)
+        SelectTabVisual(4)
         RefreshBanish()
     end
 
     switchLogbook = function()
         HideAllContent()
-        overviewOuter._deleteBtn:Hide()
+        if overviewOuter._deleteBtn then overviewOuter._deleteBtn:Hide() end
         logbookParent:Show()
         activeOverviewTab = 5
-        PanelTemplates_SetTab(f, 5)
-        PanelTemplates_EnableTab(f, 1)
-        PanelTemplates_EnableTab(f, 2)
-        PanelTemplates_EnableTab(f, 3)
-        PanelTemplates_EnableTab(f, 4)
-        PanelTemplates_EnableTab(f, 6)
+        SelectTabVisual(5)
         EbonBuilds.SessionHistory.Show(logbookParent)
     end
 
     switchAffixes = function()
         HideAllContent()
-        overviewOuter._deleteBtn:Hide()
+        if overviewOuter._deleteBtn then overviewOuter._deleteBtn:Hide() end
         affixParent:Show()
         activeOverviewTab = 6
-        PanelTemplates_SetTab(f, 6)
-        PanelTemplates_EnableTab(f, 1)
-        PanelTemplates_EnableTab(f, 2)
-        PanelTemplates_EnableTab(f, 3)
-        PanelTemplates_EnableTab(f, 4)
-        PanelTemplates_EnableTab(f, 5)
+        SelectTabVisual(6)
         EbonBuilds.AffixView.SetOverviewBuild(state.build)
         EbonBuilds.AffixView.Mount(affixParent, { build = state.build })
     end
 
-    tab1 = CreateFrame("Button", "EbonBuildsBuildOverviewTab1", f, "OptionsFrameTabButtonTemplate")
-    tab1:SetID(1)
-    tab1:SetText("Overview")
-    tab1:SetPoint("TOPLEFT", f, "TOPLEFT", 10, 0)
-    PanelTemplates_TabResize(tab1, 0)
-    tab1:SetScript("OnClick", function() if switchOverview then switchOverview() end end)
+    tabState.SelectTab = function(index)
+        if index == 1 then switchOverview()
+        elseif index == 2 then switchStats()
+        elseif index == 3 then switchMissing()
+        elseif index == 4 then switchBanish()
+        elseif index == 5 then switchLogbook()
+        elseif index == 6 then switchAffixes()
+        end
+    end
 
-    tab2 = CreateFrame("Button", "EbonBuildsBuildOverviewTab2", f, "OptionsFrameTabButtonTemplate")
-    tab2:SetID(2)
-    tab2:SetText("Stats")
-    tab2:SetPoint("LEFT", tab1, "RIGHT", -16, 0)
-    PanelTemplates_TabResize(tab2, 0)
-    tab2:SetScript("OnClick", function() if switchStats then switchStats() end end)
-
-    tab3 = CreateFrame("Button", "EbonBuildsBuildOverviewTab3", f, "OptionsFrameTabButtonTemplate")
-    tab3:SetID(3)
-    tab3:SetText("Collection")
-    tab3:SetPoint("LEFT", tab2, "RIGHT", -16, 0)
-    PanelTemplates_TabResize(tab3, 0)
-    tab3:SetScript("OnClick", function() if switchMissing then switchMissing() end end)
-
-    tab4 = CreateFrame("Button", "EbonBuildsBuildOverviewTab4", f, "OptionsFrameTabButtonTemplate")
-    tab4:SetID(4)
-    tab4:SetText("Policies")
-    tab4:SetPoint("LEFT", tab3, "RIGHT", -16, 0)
-    PanelTemplates_TabResize(tab4, 0)
-    tab4:SetScript("OnClick", function() if switchBanish then switchBanish() end end)
-
-    tab5 = CreateFrame("Button", "EbonBuildsBuildOverviewTab5", f, "OptionsFrameTabButtonTemplate")
-    tab5:SetID(5)
-    tab5:SetText("Logbook")
-    tab5:SetPoint("LEFT", tab4, "RIGHT", -16, 0)
-    PanelTemplates_TabResize(tab5, 0)
-    tab5:SetScript("OnClick", function() if switchLogbook then switchLogbook() end end)
-
-    tab6 = CreateFrame("Button", "EbonBuildsBuildOverviewTab6", f, "OptionsFrameTabButtonTemplate")
-    tab6:SetID(6)
-    tab6:SetText("Affixes")
-    tab6:SetPoint("LEFT", tab5, "RIGHT", -16, 0)
-    PanelTemplates_TabResize(tab6, 0)
-    tab6:SetScript("OnClick", function() if switchAffixes then switchAffixes() end end)
-
-    PanelTemplates_SetNumTabs(f, 6)
-    PanelTemplates_SetTab(f, 1)
+    local TAB_LABELS = { "Overview", "Stats", "Collection", "Policies", "Logbook", "Affixes" }
+    tabState.tabs = {}
+    local prevTab
+    for i, label in ipairs(TAB_LABELS) do
+        local btn = SW.CreateTabButton(tabBarFrame, label, i, tabState)
+        btn:SetPoint("TOP", tabBarFrame, "TOP", 0, 0)
+        if prevTab then
+            btn:SetPoint("LEFT", prevTab, "RIGHT", 4, 0)
+        else
+            btn:SetPoint("LEFT", tabBarFrame, "LEFT", L.PAD, 0)
+        end
+        tabState.tabs[i] = btn
+        if i == 1 then tab1 = btn elseif i == 2 then tab2 = btn elseif i == 3 then tab3 = btn
+        elseif i == 4 then tab4 = btn elseif i == 5 then tab5 = btn else tab6 = btn end
+        prevTab = btn
+    end
+    SW.UpdateTabBar(tabState)
 
     local function IsCollectionTabVisible()
         return activeOverviewTab == 3
@@ -2048,28 +2484,38 @@ local function BuildViewFrame()
         if RefreshMissing then RefreshMissing() end
     end
 
+    local function UpdateCollectionTicker()
+        if not collectionRefreshTicker then return end
+        if IsCollectionTabVisible() then
+            collectionRefreshTicker:Show()
+        else
+            collectionRefreshTicker:Hide()
+            collectionRefreshTicker.elapsed = 0
+        end
+    end
+
     local refreshFrame = CreateFrame("Frame")
     refreshFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     refreshFrame:SetScript("OnEvent", function()
         if EbonBuilds.EchoOwnership then
             EbonBuilds.EchoOwnership.Invalidate()
         end
+        InvalidateMissingCatalog()
         RefreshCollectionIfVisible()
     end)
 
     local collectionRefreshTicker = CreateFrame("Frame")
+    collectionRefreshTicker:Hide()
     collectionRefreshTicker.elapsed = 0
     collectionRefreshTicker:SetScript("OnUpdate", function(self, dt)
-        if not IsCollectionTabVisible() then
-            self.elapsed = 0
-            return
-        end
         self.elapsed = self.elapsed + dt
         if self.elapsed >= 2 then
             self.elapsed = 0
-            if RefreshMissing then RefreshMissing() end
+            if RefreshMissing then RefreshMissing(true) end
         end
     end)
+    overviewOuter._collectionTicker = collectionRefreshTicker
+    overviewOuter._updateCollectionTicker = UpdateCollectionTicker
 
     return f
 end
@@ -2092,6 +2538,9 @@ function view.Show(container, context)
     end
     if switchOverview then switchOverview() end
     viewFrame:Show()
+    if EbonBuilds.BuildOverview.OnBuildListLayoutChanged then
+        EbonBuilds.BuildOverview.OnBuildListLayoutChanged()
+    end
 end
 
 function view.Hide()
@@ -2109,6 +2558,32 @@ function EbonBuilds.BuildOverview.Init()
     viewFrame = BuildViewFrame()
     viewFrame:Hide()
     EbonBuilds.ViewRouter.Register("buildOverview", view)
+end
+
+function EbonBuilds.BuildOverview.OnBuildListLayoutChanged()
+    if not sidebarFrame or not sidebarFrame._footer then return end
+    local collapsed = EbonBuilds.MainWindow
+        and EbonBuilds.MainWindow.IsBuildListCollapsed
+        and EbonBuilds.MainWindow.IsBuildListCollapsed()
+    if collapsed then
+        sidebarFrame._footer:Show()
+    else
+        sidebarFrame._footer:Hide()
+    end
+end
+
+function EbonBuilds.BuildOverview.SetDetailPanelVisible(visible)
+    if not viewFrame then return end
+    local current = EbonBuilds.ViewRouter and EbonBuilds.ViewRouter.Current()
+    if visible and current ~= "buildOverview" then
+        viewFrame:Hide()
+        return
+    end
+    if visible then
+        viewFrame:Show()
+    else
+        viewFrame:Hide()
+    end
 end
 
 function EbonBuilds.BuildOverview.ShowMissingTab(opts)

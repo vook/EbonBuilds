@@ -32,3 +32,47 @@ function EbonBuilds.ScrollWheel.Bind(bar, step)
     end
     return wire, onWheel
 end
+
+function EbonBuilds.ScrollWheel.WireFrame(frame, bar, step)
+    local wire = select(1, EbonBuilds.ScrollWheel.Bind(bar, step))
+    wire(frame)
+end
+
+-- Forward wheel events from nested widgets (sliders, labels, etc.) to a page scrollbar.
+function EbonBuilds.ScrollWheel.WireDescendants(root, bar, step, shouldSkip)
+    if not root or not bar then return end
+    local wire = select(1, EbonBuilds.ScrollWheel.Bind(bar, step))
+    local function visit(frame)
+        if not frame or frame == bar then return end
+        if shouldSkip and shouldSkip(frame) then return end
+        wire(frame)
+        if frame.GetNumChildren then
+            for i = 1, frame:GetNumChildren() do
+                visit(select(i, frame:GetChildren()))
+            end
+        end
+    end
+    visit(root)
+end
+
+function EbonBuilds.ScrollWheel.WireSliderScroll(scrollFrame, scrollChild, bar, step, opts)
+    opts = opts or {}
+    step = step or 20
+    if not scrollFrame or not scrollChild or not bar then return end
+
+    EbonBuilds.ScrollWheel.SetupBar(bar)
+    local wire = select(1, EbonBuilds.ScrollWheel.Bind(bar, step))
+    wire(scrollFrame)
+    wire(scrollChild)
+
+    bar:SetScript("OnValueChanged", function(self, value)
+        scrollChild:ClearAllPoints()
+        scrollChild:SetPoint("TOPLEFT", scrollFrame, "TOPLEFT", 0, value)
+    end)
+
+    EbonBuilds.ScrollWheel.WireDescendants(scrollChild, bar, step, opts.shouldSkip)
+
+    if opts.onRangeChanged then
+        opts.onRangeChanged()
+    end
+end

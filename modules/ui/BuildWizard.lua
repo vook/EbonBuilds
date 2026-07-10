@@ -4,6 +4,8 @@
 
 EbonBuilds.BuildWizard = {}
 
+local SW = EbonBuilds.SiteWidgets
+
 local CLASS_TEXTURE = "Interface\\TargetingFrame\\UI-Classes-Circles"
 local QUALITY_COLOR = {
     [0] = "ffffff", [1] = "19ff19", [2] = "0066ff", [3] = "cc66ff", [4] = "ff8000",
@@ -583,6 +585,7 @@ local function RenderStep5()
     sb:SetValueStep(30)
     sb:SetMinMaxValues(0, 0)
     sb:SetValue(0)
+    SW.StyleVerticalScrollBar(sb)
     sb:SetScript("OnValueChanged", function(self, value)
         sf:SetVerticalScroll(value)
     end)

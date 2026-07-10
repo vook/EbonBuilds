@@ -174,6 +174,10 @@ local function BuildFrame()
     scrollChild:SetHeight(1)
     scrollFrame:SetScrollChild(scrollChild)
 
+    if EbonBuilds.SiteWidgets and EbonBuilds.SiteWidgets.StyleScrollFrame then
+        EbonBuilds.SiteWidgets.StyleScrollFrame(scrollFrame)
+    end
+
     f:Hide()
     return f
 end

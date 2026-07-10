@@ -98,6 +98,13 @@ function test_filter_unknown_excludes_place_name_text()
     lu.assertTrue(ES.PassesFilter(entry, { ["open_world:kalimdor"] = true }))
 end
 
+function test_filter_unknown_excludes_onyxia_group_without_drop_source()
+    local entry = { spellId = 1, groupId = 285, requiresTome = true }
+    lu.assertFalse(ES.PassesFilter(entry, { ["special:unknown"] = true }))
+    lu.assertTrue(ES.PassesFilter(entry, { ["raid:onyxias_lair"] = true }))
+    lu.assertEquals(ES.EntryFilterKey(entry), "raid:onyxias_lair")
+end
+
 function test_filter_unknown_excludes_toc_boss_name()
     local entry = { groupId = nil, dropSource = "Gormok the Impaler", requiresTome = true }
     lu.assertFalse(ES.PassesFilter(entry, { ["special:unknown"] = true }))

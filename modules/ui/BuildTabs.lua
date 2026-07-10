@@ -1,31 +1,31 @@
 -- EbonBuilds: modules/ui/BuildTabs.lua
--- Responsibility: tabbed container for a single build (Overview + Echoes +
--- Bonus + Automation). Registered as the "buildTabs" view. Affixes are
--- managed from the build overview dashboard, not here.
+-- Responsibility: tabbed build editor with site-styled underline tabs and footer.
 
 EbonBuilds.BuildTabs = {}
 
+local ST = EbonBuilds.SiteTheme
+local SW = EbonBuilds.SiteWidgets
+local C  = ST.C
+local L  = ST.Layout
+
 local viewFrame
 local contentArea
-local tab1, tab2, tab3, tab4
+local tabBarFrame
+local tabState = { selectedIndex = 1, tabs = {} }
 local saveBtn, cancelBtn, exportBtn, exportListBtn
 local activeTab = 1
 local state = { context = nil }
-
-------------------------------------------------------------------------
--- Tab switching
-------------------------------------------------------------------------
 
 local function RefreshButtons()
     if exportListBtn and exportBtn then
         if activeTab == 2 then
             exportListBtn:Show()
             exportBtn:ClearAllPoints()
-            exportBtn:SetPoint("BOTTOMLEFT", viewFrame, "BOTTOMLEFT", 105, 8)
+            exportBtn:SetPoint("BOTTOMLEFT", exportListBtn, "BOTTOMRIGHT", 8, 0)
         else
             exportListBtn:Hide()
             exportBtn:ClearAllPoints()
-            exportBtn:SetPoint("BOTTOMLEFT", viewFrame, "BOTTOMLEFT", 10, 8)
+            exportBtn:SetPoint("BOTTOMLEFT", exportListBtn:GetParent(), "BOTTOMLEFT", L.PAD, 8)
         end
     end
 end
@@ -43,128 +43,125 @@ local function UnmountAllTabs()
     EbonBuilds.AffixView.Unmount()
 end
 
+local function SelectTabVisual(index)
+    activeTab = index
+    tabState.selectedIndex = index
+    SW.UpdateTabBar(tabState)
+    RefreshButtons()
+end
+
 local function ShowOverview()
-    activeTab = 1
-    PanelTemplates_SetTab(viewFrame, 1)
+    SelectTabVisual(1)
     UnmountAllTabs()
     EbonBuilds.BuildForm.Mount(contentArea, state.context)
-    RefreshButtons()
 end
 
 local function ShowEchoes()
-    activeTab = 2
-    PanelTemplates_SetTab(viewFrame, 2)
+    SelectTabVisual(2)
     UnmountAllTabs()
     EbonBuilds.WeightsView.Mount(contentArea)
-    RefreshButtons()
 end
 
 local function ShowBonus()
-    activeTab = 3
-    PanelTemplates_SetTab(viewFrame, 3)
+    SelectTabVisual(3)
     UnmountAllTabs()
     EbonBuilds.BonusView.Mount(contentArea)
-    RefreshButtons()
 end
 
 local function ShowAutomation()
-    activeTab = 4
-    PanelTemplates_SetTab(viewFrame, 4)
+    SelectTabVisual(4)
     UnmountAllTabs()
     EbonBuilds.SettingsView.Mount(contentArea)
-    RefreshButtons()
 end
 
-------------------------------------------------------------------------
--- Construction
-------------------------------------------------------------------------
+tabState.SelectTab = function(index)
+    if index == 1 then ShowOverview()
+    elseif index == 2 then ShowEchoes()
+    elseif index == 3 then ShowBonus()
+    elseif index == 4 then ShowAutomation()
+    end
+end
 
-local function CreateTabs(parent)
-    tab1 = CreateFrame("Button", "EbonBuildsBuildTabsTab1", parent, "OptionsFrameTabButtonTemplate")
-    tab1:SetID(1)
-    tab1:SetText("Overview")
-    tab1:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, 0)
-    PanelTemplates_TabResize(tab1, 0)
-    tab1:SetScript("OnClick", ShowOverview)
+local function CreateTabBar(parent)
+    tabBarFrame = CreateFrame("Frame", nil, parent)
+    tabBarFrame:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
+    tabBarFrame:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, 0)
+    tabBarFrame:SetHeight(40)
+    SW.FillChrome(tabBarFrame, "tabBarBg")
 
-    tab2 = CreateFrame("Button", "EbonBuildsBuildTabsTab2", parent, "OptionsFrameTabButtonTemplate")
-    tab2:SetID(2)
-    tab2:SetText("Echoes")
-    tab2:SetPoint("LEFT", tab1, "RIGHT", -16, 0)
-    PanelTemplates_TabResize(tab2, 0)
-    tab2:SetScript("OnClick", ShowEchoes)
+    local sep = tabBarFrame:CreateTexture(nil, "ARTWORK")
+    sep:SetTexture(ST.FLAT)
+    sep:SetVertexColor(unpack(C.border))
+    sep:SetHeight(1)
+    sep:SetPoint("BOTTOMLEFT", tabBarFrame, "BOTTOMLEFT", 0, 0)
+    sep:SetPoint("BOTTOMRIGHT", tabBarFrame, "BOTTOMRIGHT", 0, 0)
 
-    tab3 = CreateFrame("Button", "EbonBuildsBuildTabsTab3", parent, "OptionsFrameTabButtonTemplate")
-    tab3:SetID(3)
-    tab3:SetText("Bonus")
-    tab3:SetPoint("LEFT", tab2, "RIGHT", -16, 0)
-    PanelTemplates_TabResize(tab3, 0)
-    tab3:SetScript("OnClick", ShowBonus)
-
-    tab4 = CreateFrame("Button", "EbonBuildsBuildTabsTab4", parent, "OptionsFrameTabButtonTemplate")
-    tab4:SetID(4)
-    tab4:SetText("Automation")
-    tab4:SetPoint("LEFT", tab3, "RIGHT", -16, 0)
-    PanelTemplates_TabResize(tab4, 0)
-    tab4:SetScript("OnClick", ShowAutomation)
+    local labels = { "Overview", "Echoes", "Bonus", "Automation" }
+    tabState.tabs = {}
+    local prev
+    for i, label in ipairs(labels) do
+        local btn = SW.CreateTabButton(tabBarFrame, label, i, tabState)
+        btn:SetPoint("TOP", tabBarFrame, "TOP", 0, 0)
+        if prev then
+            btn:SetPoint("LEFT", prev, "RIGHT", 4, 0)
+        else
+            btn:SetPoint("LEFT", tabBarFrame, "LEFT", L.PAD, 0)
+        end
+        tabState.tabs[i] = btn
+        prev = btn
+    end
+    SW.UpdateTabBar(tabState)
 end
 
 local function CreateContentArea(parent)
     local frame = CreateFrame("Frame", nil, parent)
-    frame:SetPoint("TOPLEFT",     parent, "TOPLEFT",     0, -24)
-    frame:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", 0, 34)
-    frame:SetBackdrop({
-        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile     = true,
-        tileSize = 16,
-        edgeSize = 16,
-        insets   = { left = 4, right = 4, top = 4, bottom = 4 },
-    })
-    frame:SetBackdropColor(0, 0, 0, 0.6)
-    frame:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+    frame:SetPoint("TOPLEFT",     tabBarFrame, "BOTTOMLEFT", 0, 0)
+    frame:SetPoint("BOTTOMRIGHT", parent,      "BOTTOMRIGHT", 0, 44)
+    SW.FillChrome(frame, "mainBg")
+    SW.ThinBorder(frame, "borderSoft", 1)
 
     local inner = CreateFrame("Frame", nil, frame)
-    inner:SetPoint("TOPLEFT",     frame, "TOPLEFT",     6, -6)
-    inner:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -6, 6)
+    inner:SetPoint("TOPLEFT",     frame, "TOPLEFT",     L.PAD, -L.PAD)
+    inner:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -L.PAD, L.PAD)
     return inner
 end
 
 local function BuildViewFrame()
     local f = CreateFrame("Frame", "EbonBuildsBuildTabs", UIParent)
-    CreateTabs(f)
+    SW.FillChrome(f, "bg")
+
+    CreateTabBar(f)
     contentArea = CreateContentArea(f)
-    PanelTemplates_SetNumTabs(f, 4)
-    PanelTemplates_SetTab(f, 1)
 
-    saveBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    saveBtn:SetSize(90, 22)
-    saveBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 8)
-    saveBtn:SetText("Save")
-    saveBtn:SetScript("OnClick", function() EbonBuilds.BuildForm.Save() end)
+    local footer = CreateFrame("Frame", nil, f)
+    footer:SetPoint("BOTTOMLEFT",  f, "BOTTOMLEFT",  0, 0)
+    footer:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
+    footer:SetHeight(44)
+    SW.FillChrome(footer, "tabBarBg")
 
-    cancelBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    cancelBtn:SetSize(90, 22)
-    cancelBtn:SetPoint("RIGHT", saveBtn, "LEFT", -6, 0)
-    cancelBtn:SetText("Cancel")
-    cancelBtn:SetScript("OnClick", function() EbonBuilds.BuildForm.Cancel() end)
-
-    exportListBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    exportListBtn:SetSize(90, 22)
-    exportListBtn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 8)
-    exportListBtn:SetText("Export List")
+    exportListBtn = SW.CreateOutlineButton(footer, "Export List", 100)
+    exportListBtn:SetPoint("BOTTOMLEFT", footer, "BOTTOMLEFT", L.PAD, 8)
     exportListBtn:Hide()
     exportListBtn:SetScript("OnClick", function()
         local build = EbonBuilds.Build.GetActive()
-        if build and EbonBuilds.Weights.ShowExportListDialog then
+        if not build and EbonBuilds.BuildForm and EbonBuilds.BuildForm.GetEditingBuild then
+            build = EbonBuilds.BuildForm.GetEditingBuild()
+        end
+        if not build then
+            if EbonBuilds.Toast then
+                EbonBuilds.Toast.Show("No build selected.")
+            end
+            return
+        end
+        if EbonBuilds.Weights and EbonBuilds.Weights.ShowExportListDialog then
             EbonBuilds.Weights.ShowExportListDialog(build)
+        elseif EbonBuilds.Toast then
+            EbonBuilds.Toast.Show("Export is not available.")
         end
     end)
 
-    exportBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    exportBtn:SetSize(90, 22)
-    exportBtn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 8)
-    exportBtn:SetText("Export")
+    exportBtn = SW.CreateOutlineButton(footer, "Export", 90)
+    exportBtn:SetPoint("BOTTOMLEFT", footer, "BOTTOMLEFT", L.PAD, 8)
     exportBtn:SetScript("OnClick", function()
         local build = EbonBuilds.Build.GetActive()
         if build then
@@ -172,20 +169,22 @@ local function BuildViewFrame()
         end
     end)
 
+    cancelBtn = SW.CreateOutlineButton(footer, "Cancel", 90)
+    cancelBtn:SetPoint("BOTTOMRIGHT", footer, "BOTTOMRIGHT", -(L.PAD + 96), 8)
+    cancelBtn:SetScript("OnClick", function() EbonBuilds.BuildForm.Cancel() end)
+
+    saveBtn = SW.CreateAccentButton(footer, "Save", function()
+        EbonBuilds.BuildForm.Save()
+    end)
+    saveBtn:SetSize(90, 28)
+    saveBtn:SetPoint("BOTTOMRIGHT", footer, "BOTTOMRIGHT", -L.PAD, 8)
+
     return f
 end
 
-------------------------------------------------------------------------
--- Public helper
-------------------------------------------------------------------------
-
 function EbonBuilds.BuildTabs.EnableEchoesTab()
-    if viewFrame then PanelTemplates_EnableTab(viewFrame, 2) end
+    -- All tabs always enabled in site-style bar.
 end
-
-------------------------------------------------------------------------
--- View interface
-------------------------------------------------------------------------
 
 local view = {}
 
@@ -196,15 +195,9 @@ function view.Show(container, context)
 
     state.context = context or { mode = "create" }
 
-    PanelTemplates_SetTab(viewFrame, 1)
-    PanelTemplates_EnableTab(viewFrame, 2)
-    PanelTemplates_EnableTab(viewFrame, 3)
-    PanelTemplates_EnableTab(viewFrame, 4)
-
     UnmountAllTabs()
     EbonBuilds.BuildForm.Mount(contentArea, state.context)
-    activeTab = 1
-    RefreshButtons()
+    SelectTabVisual(1)
     viewFrame:Show()
 end
 
@@ -216,10 +209,6 @@ function view.Hide()
     UnmountAllTabs()
     if viewFrame then viewFrame:Hide() end
 end
-
-------------------------------------------------------------------------
--- Init
-------------------------------------------------------------------------
 
 function EbonBuilds.BuildTabs.Init()
     viewFrame = BuildViewFrame()

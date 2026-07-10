@@ -98,12 +98,14 @@ local function OnAddonLoaded(addonName)
         globalSettings = {
             evalDelay     = 2,
             toastDuration = 3,
+            windowOpacity = 1,
         },
     }
     EbonBuildsDB.minimapAngle = EbonBuildsDB.minimapAngle or 220
     EbonBuildsDB.globalSettings = EbonBuildsDB.globalSettings or {}
     EbonBuildsDB.globalSettings.evalDelay     = EbonBuildsDB.globalSettings.evalDelay     or 2
     EbonBuildsDB.globalSettings.toastDuration = EbonBuildsDB.globalSettings.toastDuration or 3
+    EbonBuildsDB.globalSettings.windowOpacity = EbonBuildsDB.globalSettings.windowOpacity or 1
 
     EbonBuildsCharDB = EbonBuildsCharDB or {
         activeBuildId = nil,
@@ -124,6 +126,12 @@ local function OnAddonLoaded(addonName)
     end
     EbonBuilds.BuildWizard.Init()
     EbonBuilds.MinimapButton.Init()
+    if EbonBuilds.SiteTheme and EbonBuilds.SiteTheme.SetAccentClass then
+        local playerClass = EbonBuilds.Build and EbonBuilds.Build.PlayerClassToken
+            and EbonBuilds.Build.PlayerClassToken()
+            or select(2, UnitClass("player"))
+        EbonBuilds.SiteTheme.SetAccentClass(playerClass)
+    end
     EbonBuilds.MainWindow.Init()
     EbonBuilds.Automation.Init()
     EbonBuilds.Sync.Init()

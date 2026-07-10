@@ -6,6 +6,8 @@
 
 EbonBuilds.BonusView = {}
 
+local SW = EbonBuilds.SiteWidgets
+
 local QUALITY_LABELS = {
     [0] = { name = "Common",    color = "ffffff" },
     [1] = { name = "Uncommon",  color = "19ff19" },
@@ -20,80 +22,35 @@ local FAMILY_ORDER = {
 
 local viewFrame
 local scrollFrame, scrollChild, scrollBar
+local lastScrollBarShown
 local qualityBoxes     = {}
 local qualityModeToggles = {}
 local familyBoxes      = {}
 local familyModeToggles = {}
 local noveltyBox, noveltyModeToggle
 
-local CONTENT_HEIGHT = 400
+local CONTENT_HEIGHT = 275
+local SCROLLBAR_W = 8
+
+local function SyncScrollInsets()
+    if not scrollFrame or not viewFrame then return end
+    local gutter = (scrollBar and scrollBar:IsShown()) and (SCROLLBAR_W + 4) or 0
+    scrollFrame:SetPoint("BOTTOMRIGHT", viewFrame, "BOTTOMRIGHT", -(gutter), 10)
+end
 
 local function CreateModeToggle(parent, x, y)
-    local btn = CreateFrame("Button", nil, parent)
-    btn:SetWidth(20)
-    btn:SetHeight(22)
-    btn:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
-    btn:SetBackdrop({
-        bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 8, edgeSize = 8,
-        insets = { left = 2, right = 2, top = 2, bottom = 2 },
-    })
-    btn:SetBackdropColor(0.15, 0.15, 0.15, 0.8)
-    btn:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-
-    local label = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    label:SetPoint("CENTER", btn, "CENTER", 0, 0)
-    label:SetText("+")
-    btn.modeLabel = label
-    btn.multiplicative = false
-
-    btn:SetScript("OnClick", function()
-        btn.multiplicative = not btn.multiplicative
-        btn.modeLabel:SetText(btn.multiplicative and "|cff19ff19x|r" or "+")
-        btn.onToggle()
-    end)
-    return btn
+    return SW.CreateModeToggleButton(parent, { x = x, y = y })
 end
 
 local function CreateNumberEditBox(parent, width, height, allowNegative, allowDecimal)
-    local c = CreateFrame("Frame", nil, parent)
-    c:SetSize(width, height)
-    c:SetBackdrop({
-        bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 8, edgeSize = 8,
-        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    local _, edit = SW.CreateNumericEditBox(parent, {
+        width = width,
+        height = height,
+        allowNegative = allowNegative,
+        allowDecimal = allowDecimal,
+        maxLetters = 6,
     })
-    c:SetBackdropColor(0, 0, 0, 0.6)
-    c:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-
-    local box = CreateFrame("EditBox", nil, c)
-    box:SetPoint("TOPLEFT",     c, "TOPLEFT",     4, -4)
-    box:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", -4, 4)
-    box:SetFont("Fonts\\FRIZQT__.TTF", 12, "")
-    box:SetTextColor(1, 1, 1, 1)
-    box:SetJustifyH("CENTER")
-    box:SetAutoFocus(false)
-    box:SetMaxLetters(6)
-    box:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    box:SetScript("OnChar", function(self, char)
-        local valid = (char >= "0" and char <= "9")
-        if allowDecimal and char == "." then
-            local text = self:GetText()
-            if not text:find("%.") then valid = true end
-        end
-        if allowNegative and char == "-" then
-            if self:GetCursorPosition() == 0 then valid = true end
-        end
-        if not valid then
-            local pos  = self:GetCursorPosition()
-            local text = self:GetText()
-            self:SetText(string.sub(text, 1, pos) .. string.sub(text, pos + 2))
-            self:SetCursorPosition(pos)
-        end
-    end)
-    return box
+    return edit
 end
 
 ------------------------------------------------------------------------
@@ -270,24 +227,21 @@ local function RefreshInputs()
         qualityBoxes[q]:SetText(tostring(settings.qualityBonus[q] or 0))
         local toggle = qualityModeToggles[q]
         if toggle then
-            toggle.multiplicative = settings.qualityBonusMode[q] or false
-            toggle.modeLabel:SetText(toggle.multiplicative and "|cff19ff19x|r" or "+")
+            toggle:SetMultiplicative(settings.qualityBonusMode[q])
         end
     end
     for _, fam in ipairs(FAMILY_ORDER) do
         familyBoxes[fam]:SetText(tostring(settings.familyBonus[fam] or 0))
         local toggle = familyModeToggles[fam]
         if toggle then
-            toggle.multiplicative = settings.familyBonusMode[fam] or false
-            toggle.modeLabel:SetText(toggle.multiplicative and "|cff19ff19x|r" or "+")
+            toggle:SetMultiplicative(settings.familyBonusMode[fam])
         end
     end
     if noveltyBox then
         noveltyBox:SetText(tostring(settings.noveltyValue or 0))
     end
     if noveltyModeToggle then
-        noveltyModeToggle.multiplicative = settings.noveltyMode or false
-        noveltyModeToggle.modeLabel:SetText(noveltyModeToggle.multiplicative and "|cff19ff19x|r" or "+")
+        noveltyModeToggle:SetMultiplicative(settings.noveltyMode)
     end
 end
 
@@ -302,11 +256,14 @@ end
 ------------------------------------------------------------------------
 
 local function UpdateScrollRange()
-    if not scrollFrame or not scrollBar then return end
-    local sfHeight = scrollFrame:GetHeight()
-    local range = math.max(0, CONTENT_HEIGHT - sfHeight)
-    scrollBar:SetMinMaxValues(0, range)
-    if scrollBar:GetValue() > range then scrollBar:SetValue(range) end
+    if not scrollFrame or not scrollChild or not scrollBar then return end
+    scrollChild:SetHeight(CONTENT_HEIGHT)
+    local needsBar = SW.UpdateVerticalScroll(scrollFrame, scrollChild, scrollBar)
+    if lastScrollBarShown ~= needsBar then
+        lastScrollBarShown = needsBar
+        SyncScrollInsets()
+    end
+    return needsBar
 end
 
 ------------------------------------------------------------------------
@@ -322,7 +279,7 @@ local function BuildViewFrame(parent)
 
     scrollFrame = CreateFrame("ScrollFrame", nil, f)
     scrollFrame:SetPoint("TOPLEFT",     f, "TOPLEFT",     0, -28)
-    scrollFrame:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -22, 10)
+    scrollFrame:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 10)
 
     scrollChild = CreateFrame("Frame", nil, scrollFrame)
     scrollChild:SetWidth(520)
@@ -330,27 +287,30 @@ local function BuildViewFrame(parent)
     scrollFrame:SetScrollChild(scrollChild)
 
     scrollBar = CreateFrame("Slider", nil, scrollFrame, "UIPanelScrollBarTemplate")
-    scrollBar:SetPoint("TOPLEFT",     scrollFrame, "TOPRIGHT",     -2, -4)
-    scrollBar:SetPoint("BOTTOMLEFT",  scrollFrame, "BOTTOMRIGHT",  -2,  4)
+    scrollBar:SetPoint("TOPLEFT",     scrollFrame, "TOPRIGHT",     -SCROLLBAR_W, -4)
+    scrollBar:SetPoint("BOTTOMLEFT",  scrollFrame, "BOTTOMRIGHT",  -SCROLLBAR_W,  4)
     scrollBar:SetValueStep(20)
     scrollBar:SetValue(0)
-
-    scrollBar:SetScript("OnValueChanged", function(self, value)
-        scrollChild:SetPoint("TOPLEFT", scrollFrame, "TOPLEFT", 0, value)
-    end)
-
-    scrollFrame:EnableMouseWheel(true)
-    scrollFrame:SetScript("OnMouseWheel", function(self, delta)
-        local current  = scrollBar:GetValue()
-        local min, max = scrollBar:GetMinMaxValues()
-        scrollBar:SetValue(math.max(min, math.min(max, current - delta * 20)))
-    end)
+    scrollBar:Hide()
 
     scrollFrame:SetScript("OnSizeChanged", UpdateScrollRange)
 
     BuildQualityBonusSection(scrollChild, 10,  -5)
     BuildFamilyBonusSection (scrollChild, 10, -90)
     BuildNoveltyBonusSection(scrollChild, 10, -215)
+
+    EbonBuilds.ScrollWheel.WireSliderScroll(scrollFrame, scrollChild, scrollBar, 20)
+    if SW.StyleVerticalScrollBar then
+        SW.StyleVerticalScrollBar(scrollBar)
+    end
+    scrollBar:SetScript("OnValueChanged", function()
+        SW.UpdateVerticalScroll(scrollFrame, scrollChild, scrollBar)
+    end)
+    scrollFrame:EnableMouseWheel(true)
+    scrollFrame:SetScript("OnMouseWheel", function(_, delta)
+        if not scrollBar:IsShown() then return end
+        EbonBuilds.ScrollWheel.Apply(scrollBar, delta, 20)
+    end)
 
     return f
 end
@@ -369,6 +329,7 @@ function EbonBuilds.BonusView.Mount(container)
     viewFrame:Show()
     UpdateScrollRange()
     scrollBar:SetValue(0)
+    SW.ScheduleVerticalScroll(scrollFrame, scrollChild, scrollBar)
 end
 
 function EbonBuilds.BonusView.Unmount()

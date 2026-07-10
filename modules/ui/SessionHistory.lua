@@ -1,24 +1,41 @@
 -- EbonBuilds: modules/ui/SessionHistory.lua
 -- Responsibility: session history UI replacing the Logbook tab content.
--- Top: horizontal row of session cards. Bottom: full-width log table.
 
 EbonBuilds.SessionHistory = {}
 
-local QUALITY_HEX = { [0]="ffffff", [1]="19ff19", [2]="0066ff", [3]="cc66ff", [4]="ff8000" }
+local ST = EbonBuilds.SiteTheme
+local SW = EbonBuilds.SiteWidgets
+local C  = ST.C
+local L  = ST.Layout
+
 local ACTION_COLORS = {
-    Banish         = { 1.0, 0.27, 0.27 },
-    Reroll         = { 0.27, 0.67, 1.0 },
-    Freeze         = { 0.27, 0.80, 1.0 },
-    Select         = { 0.27, 1.0, 0.27 },
+    Banish              = { 1.0, 0.27, 0.27 },
+    Reroll              = { 0.27, 0.67, 1.0 },
+    Freeze              = { 0.27, 0.80, 1.0 },
+    Select              = { 0.27, 1.0, 0.27 },
     ["Select (Locked)"] = { 1.0, 0.53, 0.0 },
 }
 
-local CARD_W     = 170
-local CARD_H     = 48
-local CARD_GAP   = 6
-local TOP_H      = 68
+local CARD_W          = 176
+local CARD_H          = 50
+local CARD_GAP        = 8
+local TOP_TOOLBAR_H   = 32
+local TOP_SESSION_H   = 56
+local TOP_H           = TOP_TOOLBAR_H + TOP_SESSION_H + 6
+
+local LOG_CHARGES_W   = 100
+local LOG_ROW_H       = 22
+local LOG_WEIGHT_W    = 30
+local LOG_WEIGHT_GAP  = 10
+local LOG_SLOT_GAP    = 12
+local LOG_ROW_GAP     = 2
+local LOG_ACTION_PAD  = 8
+
+local logColumnHeader
+local measureFont
 
 local topPanel, bottomPanel
+local rootPanel
 local sessionItems = {}
 local logRows      = {}
 local selectedSessionId = nil
@@ -27,6 +44,25 @@ local sessionChild, sessionClip, scrollOffset = nil, nil, 0
 local logScroll, logChild, logBar
 local durationTimer
 local logRefreshTimer
+
+local function ScheduleLogbookLayout()
+    if not logScroll or not logChild then return end
+    if not rootPanel or not rootPanel:IsShown() then return end
+
+    local viewH = logScroll:GetHeight() or 0
+    if viewH < 8 then
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0, ScheduleLogbookLayout)
+        end
+        return
+    end
+
+    logChild:SetWidth(math.max(logScroll:GetWidth() or 0, 450))
+    if logBar then
+        SW.UpdateVerticalScroll(logScroll, logChild, logBar)
+    end
+    EbonBuilds.SessionHistory.RefreshLogView()
+end
 
 ------------------------------------------------------------------------
 -- Helpers
@@ -40,12 +76,36 @@ local function FormatDuration(startTime, endTime)
     return string.format("%02d:%02d:%02d", h, m, s)
 end
 
-local function FormatTimestamp(ts)
-    return date("%H:%M:%S", ts)
+local function MeasureText(text, size)
+    if not measureFont then return #tostring(text) * 6 end
+    SW.SetFont(measureFont, size or 10, "regular")
+    measureFont:SetText(text or "")
+    return measureFont:GetStringWidth() or 0
+end
+
+local function SessionCardLines(session, isActive)
+    local logs = session.logs or {}
+    local n = #logs
+    local buildTitle = session.buildTitle or "Untitled build"
+    local dur = FormatDuration(session.startTime, isActive and nil or session.endTime)
+
+    if isActive then
+        local meta = string.format("%d actions · %s", n, dur)
+        return buildTitle, meta
+    end
+
+    local when = session.startTime and date("%b %d · %H:%M", session.startTime) or ""
+    local peak = (session.maxLevel and session.maxLevel > 1)
+        and string.format("Lv %d · ", session.maxLevel) or ""
+    local meta = string.format("%s%d actions · %s", peak, n, dur)
+    if when ~= "" then
+        meta = meta .. " · " .. when
+    end
+    return buildTitle, meta
 end
 
 ------------------------------------------------------------------------
--- Duration timer (updates active session card every ~1s)
+-- Duration timer
 ------------------------------------------------------------------------
 
 local activeSessionCard = nil
@@ -55,16 +115,18 @@ local function OnDurationTick(self, dt)
     if self._elapsed < 1 then return end
     self._elapsed = 0
 
-    if not activeSessionCard then
-        self:Hide()
-        return
-    end
-    if not activeSessionCard._isActive then
+    if not activeSessionCard or not activeSessionCard._isActive then
         activeSessionCard = nil
         self:Hide()
         return
     end
-    activeSessionCard._durationLabel:SetText(FormatDuration(activeSessionCard._startTime, nil))
+
+    local _, meta = SessionCardLines({
+        startTime = activeSessionCard._startTime,
+        logs = activeSessionCard._logs or {},
+        buildTitle = activeSessionCard._buildTitle,
+    }, true)
+    activeSessionCard._metaLabel:SetText(meta)
 end
 
 local function StartDurationTimer(card)
@@ -78,7 +140,7 @@ local function StartDurationTimer(card)
 end
 
 ------------------------------------------------------------------------
--- Session cards (horizontal row at top)
+-- Session cards
 ------------------------------------------------------------------------
 
 local function ClearSessionItems()
@@ -87,53 +149,65 @@ local function ClearSessionItems()
     end
 end
 
+local function ApplySessionCardState(item, selected)
+    if selected then
+        item._bg:SetVertexColor(
+            C.accentBg10[1], C.accentBg10[2], C.accentBg10[3], 1)
+    elseif item._isActive then
+        item._bg:SetVertexColor(
+            C.successBg10[1], C.successBg10[2], C.successBg10[3], 1)
+    else
+        item._bg:SetVertexColor(unpack(C.elementBg))
+    end
+
+    if item._activeStripe then
+        if item._isActive then
+            item._activeStripe:Show()
+        else
+            item._activeStripe:Hide()
+        end
+    end
+end
+
 local function SelectSession(id)
     selectedSessionId = id
     for _, item in ipairs(sessionItems) do
-        if item._id == id then
-            item:SetBackdropBorderColor(1.0, 0.84, 0.0, 1)
-        else
-            local isActive = item._isActive
-            item:SetBackdropBorderColor(isActive and 0.27 or 0.4, isActive and 1.0 or 0.4, isActive and 0.27 or 0.4, 1)
-        end
+        ApplySessionCardState(item, item._id == id)
     end
-    EbonBuilds.SessionHistory.RefreshLogView()
+    ScheduleLogbookLayout()
 end
 
 local function BuildCard(parent)
-    local item = CreateFrame("Frame", nil, parent)
+    local item = CreateFrame("Button", nil, parent)
     item:SetSize(CARD_W, CARD_H)
+    item:RegisterForClicks("LeftButtonUp")
+    item._bg = SW.Fill(item, "elementBg")
 
-    item:SetBackdrop({
-        bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile     = true, tileSize = 8, edgeSize = 8,
-        insets   = { left = 2, right = 2, top = 2, bottom = 2 },
-    })
-    item:SetBackdropColor(0.12, 0.12, 0.12, 0.9)
-    item:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-    item:EnableMouse(true)
+    item._activeStripe = item:CreateTexture(nil, "ARTWORK")
+    item._activeStripe:SetTexture(ST.FLAT)
+    item._activeStripe:SetVertexColor(unpack(C.success))
+    item._activeStripe:SetWidth(3)
+    item._activeStripe:SetPoint("TOPLEFT", item, "TOPLEFT", 0, 0)
+    item._activeStripe:SetPoint("BOTTOMLEFT", item, "BOTTOMLEFT", 0, 0)
+    item._activeStripe:Hide()
 
-    item._levelLabel = item:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    item._levelLabel:SetPoint("TOPLEFT", item, "TOPLEFT", 6, -4)
-    item._levelLabel:SetPoint("RIGHT", item, "RIGHT", -6, 0)
-    item._levelLabel:SetTextColor(0.7, 0.7, 0.7, 1)
+    item._titleLabel = SW.Label(item, "", 11, C.text, false, "semibold")
+    item._titleLabel:SetPoint("TOPLEFT", item, "TOPLEFT", 10, -8)
+    item._titleLabel:SetPoint("RIGHT", item, "RIGHT", -24, 0)
+    item._titleLabel:SetJustifyH("LEFT")
+    item._titleLabel:SetHeight(14)
 
-    item._soulLabel = item:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    item._soulLabel:SetPoint("TOPLEFT", item._levelLabel, "BOTTOMLEFT", 0, -2)
-    item._soulLabel:SetPoint("RIGHT", item, "RIGHT", -6, 0)
-    item._soulLabel:SetTextColor(0.7, 0.7, 0.7, 1)
+    item._metaLabel = SW.Label(item, "", 10, C.textMuted)
+    item._metaLabel:SetPoint("TOPLEFT", item._titleLabel, "BOTTOMLEFT", 0, -2)
+    item._metaLabel:SetPoint("RIGHT", item, "RIGHT", -24, 0)
+    item._metaLabel:SetJustifyH("LEFT")
+    item._metaLabel:SetHeight(12)
 
-    item._durationLabel = item:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    item._durationLabel:SetPoint("BOTTOMLEFT", item, "BOTTOMLEFT", 6, 4)
-    item._durationLabel:SetTextColor(0.5, 0.5, 0.5, 1)
-
-    -- Delete button (hidden for active sessions)
     local delBtn = CreateFrame("Button", nil, item)
-    delBtn:SetSize(14, 14)
-    delBtn:SetPoint("BOTTOMRIGHT", item, "BOTTOMRIGHT", -6, 4)
+    delBtn:SetSize(16, 16)
+    delBtn:SetPoint("TOPRIGHT", item, "TOPRIGHT", -4, -4)
     delBtn:SetNormalFontObject("GameFontHighlightSmall")
-    delBtn:SetText("|cff888888X|r")
+    delBtn:SetText("|cff888888×|r")
     delBtn:SetScript("OnClick", function()
         if item._id then
             StaticPopupDialogs["EBONBUILDS_DELETE_SESSION"] = {
@@ -141,7 +215,9 @@ local function BuildCard(parent)
                 button1 = "Yes", button2 = "No",
                 OnAccept = function()
                     EbonBuilds.Session.DeleteSession(item._id)
-                    selectedSessionId = nil
+                    if selectedSessionId == item._id then
+                        selectedSessionId = nil
+                    end
                     EbonBuilds.SessionHistory.RefreshSessionList()
                     EbonBuilds.SessionHistory.RefreshLogView()
                 end,
@@ -152,7 +228,7 @@ local function BuildCard(parent)
     end)
     item._delBtn = delBtn
 
-    item:SetScript("OnMouseDown", function()
+    item:SetScript("OnClick", function()
         if item._id then SelectSession(item._id) end
     end)
 
@@ -181,49 +257,41 @@ function EbonBuilds.SessionHistory.RefreshSessionList()
     end
 
     local activeCard = nil
-    local x = 4
+    local x = 0
     for i, s in ipairs(sorted) do
         if #sessionItems < i then
             sessionItems[i] = BuildCard(sessionChild)
         end
         local item = sessionItems[i]
 
-        item._id        = s.id
-        item._isActive  = (s.endTime == nil)
-        item._startTime = s.startTime
+        item._id         = s.id
+        item._isActive   = (s.endTime == nil)
+        item._startTime  = s.startTime
+        item._logs       = s.logs
+        item._buildTitle = s.buildTitle
+
         item:ClearAllPoints()
-        item:SetPoint("TOPLEFT", sessionChild, "TOPLEFT", x, -2)
+        item:SetPoint("TOPLEFT", sessionChild, "TOPLEFT", x, 0)
         item:SetSize(CARD_W, CARD_H)
 
-        local isActive = (s.endTime == nil)
+        local title, meta = SessionCardLines(s, item._isActive)
+        item._titleLabel:SetText(title)
+        item._metaLabel:SetText(meta)
 
-        if isActive then
-            item:SetBackdropBorderColor(0.27, 1.0, 0.27, 1)
-            item._levelLabel:SetText(("|cff44ff44[Active]|r  Level %d"):format(s.maxLevel or UnitLevel("player")))
-            item._durationLabel:SetText(FormatDuration(s.startTime, nil))
+        if item._isActive then
             if item._delBtn then item._delBtn:Hide() end
             activeCard = item
         else
-            item:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-            item._levelLabel:SetText(("Level %d"):format(s.maxLevel or UnitLevel("player")))
-            item._durationLabel:SetText(FormatDuration(s.startTime, s.endTime))
             if item._delBtn then item._delBtn:Show() end
         end
-        item._levelLabel:SetTextColor(0.7, 0.7, 0.7, 1)
 
-        item._soulLabel:SetText(("Soul Ashes: %s"):format(isActive and "..." or tostring(s.soulAshes)))
-
-        if s.id == selectedSessionId then
-            item:SetBackdropBorderColor(1.0, 0.84, 0.0, 1)
-        end
-
+        ApplySessionCardState(item, s.id == selectedSessionId)
         item:Show()
         x = x + CARD_W + CARD_GAP
     end
 
     sessionChild:SetWidth(math.max(x, 1))
 
-    -- Start or stop the duration timer for the active session
     if activeCard then
         StartDurationTimer(activeCard)
     elseif durationTimer then
@@ -231,16 +299,15 @@ function EbonBuilds.SessionHistory.RefreshSessionList()
         activeSessionCard = nil
     end
 
-    -- Reset scroll offset if content is smaller than viewport now
     local clipW = sessionClip:GetWidth()
     if x <= clipW then
         scrollOffset = 0
-        sessionChild:SetPoint("TOPLEFT", sessionClip, "TOPLEFT", 0, -2)
+        sessionChild:SetPoint("TOPLEFT", sessionClip, "TOPLEFT", 0, 0)
     end
 end
 
 ------------------------------------------------------------------------
--- Log table (full width below)
+-- Log table
 ------------------------------------------------------------------------
 
 local function ClearLogRows()
@@ -249,56 +316,122 @@ local function ClearLogRows()
     end
 end
 
+local function ComputeLogLayout(logs, rowW)
+    local actionW = LOG_ACTION_PAD
+    for _, entry in ipairs(logs) do
+        local w = MeasureText(entry.action or "", 11) + LOG_ACTION_PAD
+        if w > actionW then actionW = w end
+    end
+    actionW = math.max(44, math.ceil(actionW))
+
+    local slotWidths = { 0, 0, 0 }
+    for _, entry in ipairs(logs) do
+        for j = 1, 3 do
+            local ch = entry.choices and entry.choices[j]
+            if ch then
+                local need = LOG_WEIGHT_W + LOG_WEIGHT_GAP
+                    + MeasureText(ch.name or "", 10) + 6
+                if need > slotWidths[j] then slotWidths[j] = need end
+            end
+        end
+    end
+
+    local gaps = LOG_ACTION_PAD + LOG_SLOT_GAP * 2 + 16 + 8
+    local avail = rowW - actionW - LOG_CHARGES_W - gaps
+    local ideal = slotWidths[1] + slotWidths[2] + slotWidths[3]
+
+    if ideal <= 0 then
+        local even = math.max(80, math.floor(avail / 3))
+        return actionW, even, even, even
+    end
+
+    if ideal <= avail then
+        return actionW, slotWidths[1], slotWidths[2], slotWidths[3]
+    end
+
+    local scale = avail / ideal
+    return actionW,
+        math.max(72, math.floor(slotWidths[1] * scale)),
+        math.max(72, math.floor(slotWidths[2] * scale)),
+        math.max(72, math.floor(slotWidths[3] * scale))
+end
+
+local function LayoutLogColumnHeader(actionW, w1, w2, w3)
+    if not logColumnHeader then return end
+    local x = LOG_ACTION_PAD
+    logColumnHeader._actionLbl:ClearAllPoints()
+    logColumnHeader._actionLbl:SetPoint("LEFT", logColumnHeader, "LEFT", x, 0)
+    logColumnHeader._actionLbl:SetWidth(actionW)
+    x = x + actionW + LOG_SLOT_GAP
+
+    local widths = { w1, w2, w3 }
+    for i = 1, 3 do
+        local lbl = logColumnHeader._choiceLbls[i]
+        lbl:ClearAllPoints()
+        lbl:SetPoint("LEFT", logColumnHeader, "LEFT", x, 0)
+        lbl:SetWidth(widths[i])
+        x = x + widths[i] + LOG_SLOT_GAP
+    end
+end
+
 local function BuildLogRow(parent)
     local row = CreateFrame("Frame", nil, parent)
-    row:SetHeight(16)
+    row:SetHeight(LOG_ROW_H)
 
-    -- Timestamp
-    local timeFs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    timeFs:SetPoint("TOPLEFT", row, "TOPLEFT", 2, -1)
-    timeFs:SetWidth(48)
-    row._timeFs = timeFs
+    row._bg = row:CreateTexture(nil, "BACKGROUND")
+    row._bg:SetTexture(ST.FLAT)
+    row._bg:SetAllPoints(row)
+    row._bg:SetVertexColor(0, 0, 0, 0)
 
-    -- Action
-    local actionFs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    actionFs:SetPoint("LEFT", timeFs, "RIGHT", 3, 0)
-    actionFs:SetWidth(58)
-    row._actionFs = actionFs
+    local actionLabel = SW.Label(row, "", 11, C.text)
+    actionLabel:SetPoint("LEFT", row, "LEFT", LOG_ACTION_PAD, 0)
+    actionLabel:SetJustifyH("LEFT")
+    actionLabel:SetHeight(14)
+    row._actionLabel = actionLabel
 
-    -- Echo columns (with optional action-colored border)
-    row._echoFrames = {}
-    row._echoNameFonts  = {}
-    row._echoScoreFonts = {}
-    local echoAnchor = actionFs
+    local chargesFs = SW.Label(row, "", 10, C.textMuted)
+    chargesFs:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+    chargesFs:SetWidth(LOG_CHARGES_W)
+    chargesFs:SetJustifyH("RIGHT")
+    chargesFs:SetHeight(14)
+    row._chargesFs = chargesFs
+
+    row._echoSlots = {}
+    row._slotsRow = CreateFrame("Frame", nil, row)
+    row._slotsRow:SetPoint("LEFT", actionLabel, "RIGHT", LOG_SLOT_GAP, 0)
+    row._slotsRow:SetPoint("RIGHT", chargesFs, "LEFT", -8, 0)
+    row._slotsRow:SetPoint("TOP", row, "TOP", 0, 0)
+    row._slotsRow:SetPoint("BOTTOM", row, "BOTTOM", 0, 0)
+
     for i = 1, 3 do
-        local echoFrame = CreateFrame("Frame", nil, row)
-        echoFrame:SetHeight(14)
-        echoFrame:SetWidth(120)
-        echoFrame:SetPoint("LEFT", echoAnchor, "RIGHT", 3, 0)
-        echoFrame:SetBackdrop({
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            edgeSize = 8,
-            insets   = { left = 3, right = 3, top = 3, bottom = 3 },
-        })
-        echoFrame:SetBackdropBorderColor(0, 0, 0, 0)
-        echoFrame:EnableMouse(true)
+        local slot = CreateFrame("Frame", nil, row._slotsRow)
+        slot:SetHeight(LOG_ROW_H)
 
-        -- Score label (right side, fixed, always visible)
-        local scoreFont = echoFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        scoreFont:SetPoint("TOPRIGHT", echoFrame, "TOPRIGHT", -4, -2)
-        scoreFont:SetPoint("BOTTOMRIGHT", echoFrame, "BOTTOMRIGHT", -4, 2)
-        scoreFont:SetWidth(35)
+        local scoreFont = SW.Label(slot, "", 9, C.textMuted)
+        scoreFont:SetPoint("LEFT", slot, "LEFT", 0, 0)
+        scoreFont:SetWidth(LOG_WEIGHT_W)
         scoreFont:SetJustifyH("RIGHT")
+        scoreFont:SetHeight(14)
 
-        -- Name label (left side, truncated when too long)
-        local nameFont = echoFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        nameFont:SetPoint("TOPLEFT", echoFrame, "TOPLEFT", 4, -2)
-        nameFont:SetPoint("RIGHT", scoreFont, "LEFT", -2, 0)
+        local nameFont = SW.Label(slot, "", 10, C.text)
+        nameFont:SetPoint("LEFT", scoreFont, "RIGHT", LOG_WEIGHT_GAP, 0)
+        nameFont:SetPoint("RIGHT", slot, "RIGHT", 0, 0)
         nameFont:SetJustifyH("LEFT")
+        nameFont:SetHeight(14)
 
-        -- Tooltip
-        echoFrame:SetScript("OnEnter", function(self)
-            if self._echoName then
+        slot._nameFont = nameFont
+        slot._scoreFont = scoreFont
+        slot:EnableMouse(true)
+        slot:SetScript("OnEnter", function(self)
+            if self._spellId and EbonBuilds.EchoTableRows.ShowEchoTooltip then
+                local extra
+                if self._echoScore then
+                    extra = {
+                        { text = string.format("Score: %.0f", self._echoScore), r = 0.7, g = 0.7, b = 0.7 },
+                    }
+                end
+                EbonBuilds.EchoTableRows.ShowEchoTooltip(self, self._spellId, extra)
+            elseif self._echoName then
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                 GameTooltip:ClearLines()
                 GameTooltip:AddLine(self._echoName, 1, 1, 1)
@@ -308,20 +441,16 @@ local function BuildLogRow(parent)
                 GameTooltip:Show()
             end
         end)
-        echoFrame:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        slot:SetScript("OnLeave", function()
+            if EbonBuilds.EchoTableRows.HideEchoTooltip then
+                EbonBuilds.EchoTableRows.HideEchoTooltip()
+            else
+                GameTooltip:Hide()
+            end
+        end)
 
-        row._echoFrames[i]      = echoFrame
-        row._echoNameFonts[i]   = nameFont
-        row._echoScoreFonts[i]  = scoreFont
-        echoAnchor = echoFrame
+        row._echoSlots[i] = slot
     end
-
-    -- Charges
-    local chargesFs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    chargesFs:SetPoint("LEFT", echoAnchor, "RIGHT", 6, 0)
-    chargesFs:SetWidth(80)
-    chargesFs:SetJustifyH("LEFT")
-    row._chargesFs = chargesFs
 
     row:Hide()
     return row
@@ -331,9 +460,17 @@ function EbonBuilds.SessionHistory.RefreshLogView()
     ClearLogRows()
 
     if not logScroll or not logChild then return end
+
+    local viewH = logScroll:GetHeight() or 0
+    if viewH < 8 and logScroll:IsShown() then
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0, ScheduleLogbookLayout)
+        end
+        return
+    end
+
     logChild:SetWidth(math.max(logScroll:GetWidth() or 0, 450))
 
-    -- Track session switch so we only reset scroll when the session changes
     local prevSessionId = logChild._sessionId
     local sessionSwitched = (selectedSessionId ~= prevSessionId)
 
@@ -344,9 +481,8 @@ function EbonBuilds.SessionHistory.RefreshLogView()
         return
     end
 
-    local sessions = EbonBuilds.Session.GetSessions()
     local session
-    for _, s in ipairs(sessions) do
+    for _, s in ipairs(EbonBuilds.Session.GetSessions()) do
         if s.id == selectedSessionId then session = s; break end
     end
     if not session then
@@ -358,7 +494,6 @@ function EbonBuilds.SessionHistory.RefreshLogView()
 
     logChild._sessionId = selectedSessionId
 
-    -- Only reset scroll position when switching sessions
     local savedScroll = logBar and logBar:GetValue() or 0
     if sessionSwitched and logBar then
         savedScroll = 0
@@ -366,7 +501,23 @@ function EbonBuilds.SessionHistory.RefreshLogView()
     end
 
     local logs = session.logs or {}
-    local ROW_H = 18
+    local rowW = math.max(logChild:GetWidth() or 0, 500)
+    local actionW, w1, w2, w3 = ComputeLogLayout(logs, rowW)
+    local slotWidths = { w1, w2, w3 }
+    LayoutLogColumnHeader(actionW, w1, w2, w3)
+
+    local function LayoutEchoSlots(row)
+        local x = 0
+        for j = 1, 3 do
+            local slot = row._echoSlots[j]
+            local sw = slotWidths[j]
+            slot:ClearAllPoints()
+            slot:SetSize(sw, LOG_ROW_H)
+            slot:SetPoint("LEFT", row._slotsRow, "LEFT", x, 0)
+            x = x + sw + LOG_SLOT_GAP
+        end
+        row._actionLabel:SetWidth(actionW)
+    end
 
     for i, entry in ipairs(logs) do
         if #logRows < i then
@@ -374,66 +525,69 @@ function EbonBuilds.SessionHistory.RefreshLogView()
         end
         local row = logRows[i]
         row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", logChild, "TOPLEFT", 0, -(i - 1) * ROW_H)
+        row:SetPoint("TOPLEFT", logChild, "TOPLEFT", 0, -((i - 1) * (LOG_ROW_H + LOG_ROW_GAP)))
         row:SetPoint("RIGHT", logChild, "RIGHT", 0, 0)
-        row:SetHeight(ROW_H)
+        row:SetHeight(LOG_ROW_H)
+        LayoutEchoSlots(row)
 
-        -- Timestamp
-        row._timeFs:SetText(("|cff888888%s|r"):format(FormatTimestamp(entry.timestamp)))
+        if i % 2 == 0 then
+            row._bg:SetVertexColor(C.tierRowBg[1], C.tierRowBg[2], C.tierRowBg[3], 0.45)
+        else
+            row._bg:SetVertexColor(0, 0, 0, 0)
+        end
 
-        -- Action
-        local ac = ACTION_COLORS[entry.action] or { 1, 1, 1 }
-        local acHex = string.format("%02x%02x%02x", math.floor(ac[1]*255), math.floor(ac[2]*255), math.floor(ac[3]*255))
-        row._actionFs:SetText(("|cff%s%s|r"):format(acHex, entry.action))
+        local ac = ACTION_COLORS[entry.action] or C.text
+        row._actionLabel:SetText(entry.action or "")
+        row._actionLabel:SetTextColor(ac[1], ac[2], ac[3], 1)
 
-        -- Echoes
         for j = 1, 3 do
-            local ch = entry.choices[j]
-            local echoFrame      = row._echoFrames[j]
-            local nameFont       = row._echoNameFonts[j]
-            local scoreFont      = row._echoScoreFonts[j]
+            local ch = entry.choices and entry.choices[j]
+            local slot = row._echoSlots[j]
 
             if ch then
-                local hex = QUALITY_HEX[ch.quality] or "ffffff"
-                nameFont:SetText(("|cff%s%s|r"):format(hex, ch.name))
-                scoreFont:SetText(("|cff%s(%.0f)|r"):format(hex, ch.score))
-
-                echoFrame._echoName  = ch.name
-                echoFrame._echoScore = ch.score
-
+                local qColor = ST.QUALITY_BORDER[ch.quality] or ST.QUALITY_BORDER[0]
                 if j == entry.targetIndex then
-                    echoFrame:SetBackdropBorderColor(ac[1], ac[2], ac[3], 1)
+                    slot._nameFont:SetTextColor(ac[1], ac[2], ac[3], 1)
                 else
-                    echoFrame:SetBackdropBorderColor(0, 0, 0, 0)
+                    slot._nameFont:SetTextColor(unpack(qColor))
                 end
-                echoFrame:Show()
+                slot._nameFont:SetText(ch.name)
+                slot._scoreFont:SetText(string.format("%.0f", ch.score or 0))
+                slot._echoName  = ch.name
+                slot._echoScore = ch.score
+                slot._spellId   = EbonBuilds.EchoTableRows
+                    and EbonBuilds.EchoTableRows.ResolveSpellId
+                    and EbonBuilds.EchoTableRows.ResolveSpellId(ch.name, ch.quality)
+                    or nil
             else
-                nameFont:SetText("")
-                scoreFont:SetText("")
-                echoFrame._echoName  = nil
-                echoFrame._echoScore = nil
-                echoFrame:SetBackdropBorderColor(0, 0, 0, 0)
-                echoFrame:Show()
+                slot._nameFont:SetText("—")
+                slot._nameFont:SetTextColor(unpack(C.textMuted))
+                slot._scoreFont:SetText("")
+                slot._echoName  = nil
+                slot._echoScore = nil
+                slot._spellId   = nil
             end
         end
 
-        -- Charges
         local ch = entry.charges or {}
-        row._chargesFs:SetText(("|cff888888B:%d R:%d F:%d|r"):format(
+        row._chargesFs:SetText(string.format("B:%d  R:%d  F:%d",
             ch.ban or 0, ch.reroll or 0, ch.freeze or 0))
 
         row:Show()
     end
 
-    local totalH = math.max(#logs * ROW_H + 4, logScroll:GetHeight())
+    local totalH = math.max(#logs * (LOG_ROW_H + LOG_ROW_GAP) + 4, viewH)
     logChild:SetHeight(totalH)
     if logBar then
-        local mx = math.max(0, totalH - logScroll:GetHeight())
+        local mx = math.max(0, totalH - viewH)
         logBar:SetMinMaxValues(0, mx)
-        -- Restore scroll position after content refresh (clamp to new max)
         if not sessionSwitched then
             logBar:SetValue(math.min(savedScroll, mx))
         end
+        SW.UpdateVerticalScroll(logScroll, logChild, logBar)
+        local offset = logBar:GetValue() or 0
+        logChild:ClearAllPoints()
+        logChild:SetPoint("TOPLEFT", logScroll, "TOPLEFT", 0, offset)
     end
 end
 
@@ -574,6 +728,7 @@ local function BuildCopyDialog()
     bar:SetPoint("TOPLEFT", scroll, "TOPRIGHT", -2, -18)
     bar:SetPoint("BOTTOMLEFT", scroll, "BOTTOMRIGHT", -2, 18)
     bar:SetValueStep(18)
+    SW.StyleVerticalScrollBar(bar)
     bar:Hide()
     bar:SetScript("OnValueChanged", function(_, value)
         editBox:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, value)
@@ -584,7 +739,6 @@ local function BuildCopyDialog()
     f._editBox = editBox
     f._scroll  = scroll
     f._bar     = bar
-
     return f
 end
 
@@ -642,26 +796,28 @@ local function ScrollCards(delta)
     else
         scrollOffset = math.max(0, math.min(maxScroll, scrollOffset + delta * 30))
     end
-    sessionChild:SetPoint("TOPLEFT", sessionClip, "TOPLEFT", -scrollOffset, -2)
+    sessionChild:SetPoint("TOPLEFT", sessionClip, "TOPLEFT", -scrollOffset, 0)
 end
 
 local function BuildUI(container)
-    -- Top panel: session cards row
-    topPanel = CreateFrame("Frame", nil, container)
-    topPanel:SetPoint("TOPLEFT",     container, "TOPLEFT",  0, -4)
-    topPanel:SetPoint("TOPRIGHT",    container, "TOPRIGHT", 0,  0)
+    local root = SW.WrapContentCard(container, L.PAD)
+    rootPanel = root
+
+    topPanel = CreateFrame("Frame", nil, root)
+    topPanel:SetPoint("TOPLEFT", root, "TOPLEFT", L.PAD, -L.PAD)
+    topPanel:SetPoint("TOPRIGHT", root, "TOPRIGHT", -L.PAD, -L.PAD)
     topPanel:SetHeight(TOP_H)
 
-    local topHeader = topPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    topHeader:SetPoint("TOPLEFT", topPanel, "TOPLEFT", 4, -2)
-    topHeader:SetText("|cff888888Click a session to view its logs|r")
+    local toolbar = CreateFrame("Frame", nil, topPanel)
+    toolbar:SetPoint("TOPLEFT", topPanel, "TOPLEFT", 0, 0)
+    toolbar:SetPoint("TOPRIGHT", topPanel, "TOPRIGHT", 0, 0)
+    toolbar:SetHeight(TOP_TOOLBAR_H)
 
-    -- Export button
-    local exportBtn = CreateFrame("Button", nil, topPanel)
-    exportBtn:SetSize(60, 18)
-    exportBtn:SetPoint("TOPRIGHT", topPanel, "TOPRIGHT", -110, -2)
-    exportBtn:SetNormalFontObject("GameFontHighlightSmall")
-    exportBtn:SetText("Export")
+    local topHeader = SW.Label(toolbar, "Sessions", 12, C.text, false, "semibold")
+    topHeader:SetPoint("LEFT", toolbar, "LEFT", 4, 0)
+
+    local exportBtn = SW.CreateOutlineButton(toolbar, "Export", 72)
+    exportBtn:SetPoint("RIGHT", toolbar, "RIGHT", -90, 0)
     exportBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
         GameTooltip:SetText("Export logbook + automation settings for the selected run", 1, 1, 1)
@@ -672,66 +828,82 @@ local function BuildUI(container)
         EbonBuilds.SessionHistory.ShowCopyDialog()
     end)
 
-    -- Clear All button (right side)
-    local clearBtn = CreateFrame("Button", nil, topPanel)
-    clearBtn:SetSize(100, 18)
-    clearBtn:SetPoint("TOPRIGHT", topPanel, "TOPRIGHT", -4, -2)
-    clearBtn:SetNormalFontObject("GameFontHighlightSmall")
-    clearBtn:SetText("Clear All")
+    local clearBtn = SW.CreateOutlineButton(toolbar, "Clear All", 84)
+    clearBtn:SetPoint("RIGHT", toolbar, "RIGHT", 0, 0)
     clearBtn:SetScript("OnClick", function()
         StaticPopup_Show("EBONBUILDS_CLEAR_SESSIONS")
     end)
 
-    -- Horizontal scroll buttons for session cards
-    local scrollLeft = CreateFrame("Button", nil, topPanel)
-    scrollLeft:SetSize(16, CARD_H)
-    scrollLeft:SetPoint("BOTTOMLEFT", topPanel, "BOTTOMLEFT", 2, 0)
-    scrollLeft:SetNormalFontObject("GameFontNormal")
-    scrollLeft:SetText("|cff888888<|r")
+    local sessionRow = CreateFrame("Frame", nil, topPanel)
+    sessionRow:SetPoint("TOPLEFT", toolbar, "BOTTOMLEFT", 0, -6)
+    sessionRow:SetPoint("BOTTOMRIGHT", topPanel, "BOTTOMRIGHT", 0, 0)
+
+    local scrollLeft = SW.CreateOutlineButton(sessionRow, "<", 24)
+    scrollLeft:SetPoint("LEFT", sessionRow, "LEFT", 0, 0)
+    scrollLeft:SetPoint("TOP", sessionRow, "TOP", 0, 0)
+    scrollLeft:SetPoint("BOTTOM", sessionRow, "BOTTOM", 0, 0)
     scrollLeft:SetScript("OnMouseDown", function() ScrollCards(-1) end)
 
-    local scrollRight = CreateFrame("Button", nil, topPanel)
-    scrollRight:SetSize(16, CARD_H)
-    scrollRight:SetPoint("BOTTOMRIGHT", topPanel, "BOTTOMRIGHT", -2, 0)
-    scrollRight:SetNormalFontObject("GameFontNormal")
-    scrollRight:SetText("|cff888888>|r")
+    local scrollRight = SW.CreateOutlineButton(sessionRow, ">", 24)
+    scrollRight:SetPoint("RIGHT", sessionRow, "RIGHT", 0, 0)
+    scrollRight:SetPoint("TOP", sessionRow, "TOP", 0, 0)
+    scrollRight:SetPoint("BOTTOM", sessionRow, "BOTTOM", 0, 0)
     scrollRight:SetScript("OnMouseDown", function() ScrollCards(1) end)
 
-    -- ScrollFrame for session cards: clips children and supports mouse wheel
-    sessionClip = CreateFrame("ScrollFrame", nil, topPanel)
-    sessionClip:SetPoint("TOP",    topHeader,   "BOTTOM",   0, -4)
-    sessionClip:SetPoint("BOTTOM", topPanel,    "BOTTOM",   0,  2)
-    sessionClip:SetPoint("LEFT",   scrollLeft,  "RIGHT",    2,  0)
-    sessionClip:SetPoint("RIGHT",  scrollRight, "LEFT",    -2,  0)
+    sessionClip = CreateFrame("ScrollFrame", nil, sessionRow)
+    sessionClip:SetPoint("LEFT", scrollLeft, "RIGHT", 6, 0)
+    sessionClip:SetPoint("RIGHT", scrollRight, "LEFT", -6, 0)
+    sessionClip:SetPoint("TOP", sessionRow, "TOP", 0, 0)
+    sessionClip:SetPoint("BOTTOM", sessionRow, "BOTTOM", 0, 0)
     sessionClip:EnableMouse(true)
     sessionClip:EnableMouseWheel(true)
     sessionClip:SetScript("OnMouseWheel", function(self, delta) ScrollCards(delta) end)
 
     sessionChild = CreateFrame("Frame", nil, sessionClip)
-    sessionChild:SetPoint("TOPLEFT", sessionClip, "TOPLEFT", 0, -2)
+    sessionChild:SetPoint("TOPLEFT", sessionClip, "TOPLEFT", 0, 0)
     sessionChild:SetHeight(CARD_H)
     sessionClip:SetScrollChild(sessionChild)
 
-    -- Bottom panel: log table
-    bottomPanel = CreateFrame("Frame", nil, container)
-    bottomPanel:SetPoint("TOPLEFT",     topPanel, "BOTTOMLEFT", 0, -6)
-    bottomPanel:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", 0, 4)
+    measureFont = topPanel:CreateFontString(nil, "OVERLAY")
+    measureFont:Hide()
 
-    local logHeader = bottomPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    logHeader:SetPoint("TOPLEFT", bottomPanel, "TOPLEFT", 4, -2)
-    logHeader:SetText("|cff888888Time       Action         Echo 1                Echo 2                Echo 3                Charges|r")
+    bottomPanel = CreateFrame("Frame", nil, root)
+    bottomPanel:SetPoint("TOPLEFT", topPanel, "BOTTOMLEFT", 0, -10)
+    bottomPanel:SetPoint("BOTTOMRIGHT", root, "BOTTOMRIGHT", -L.PAD, L.PAD)
+
+    logColumnHeader = CreateFrame("Frame", nil, bottomPanel)
+    logColumnHeader:SetPoint("TOPLEFT", bottomPanel, "TOPLEFT", 0, 0)
+    logColumnHeader:SetPoint("TOPRIGHT", bottomPanel, "TOPRIGHT", -18, 0)
+    logColumnHeader:SetHeight(16)
+
+    logColumnHeader._actionLbl = SW.Label(logColumnHeader, "ACTION", 9, C.textMuted, false, "semibold")
+    logColumnHeader._actionLbl:SetPoint("LEFT", logColumnHeader, "LEFT", LOG_ACTION_PAD, 0)
+    logColumnHeader._actionLbl:SetJustifyH("LEFT")
+
+    logColumnHeader._choiceLbls = {}
+    for i = 1, 3 do
+        logColumnHeader._choiceLbls[i] = SW.Label(
+            logColumnHeader, "CHOICE " .. i, 9, C.textMuted, false, "semibold")
+        logColumnHeader._choiceLbls[i]:SetJustifyH("LEFT")
+    end
+
+    logColumnHeader._chargesLbl = SW.Label(logColumnHeader, "CHARGES", 9, C.textMuted, false, "semibold")
+    logColumnHeader._chargesLbl:SetPoint("RIGHT", logColumnHeader, "RIGHT", -8, 0)
+    logColumnHeader._chargesLbl:SetWidth(LOG_CHARGES_W)
+    logColumnHeader._chargesLbl:SetJustifyH("RIGHT")
 
     logScroll = CreateFrame("ScrollFrame", nil, bottomPanel)
-    logScroll:SetPoint("TOPLEFT",     logHeader, "BOTTOMLEFT", 0, -4)
-    logScroll:SetPoint("BOTTOMRIGHT", bottomPanel, "BOTTOMRIGHT", -2, 2)
+    logScroll:SetPoint("TOPLEFT", logColumnHeader, "BOTTOMLEFT", 0, -6)
+    logScroll:SetPoint("BOTTOMRIGHT", bottomPanel, "BOTTOMRIGHT", -18, 0)
 
     logChild = CreateFrame("Frame", nil, logScroll)
     logScroll:SetScrollChild(logChild)
 
     logBar = CreateFrame("Slider", nil, logScroll, "UIPanelScrollBarTemplate")
-    logBar:SetPoint("TOPLEFT",    logScroll, "TOPRIGHT",    -2, -4)
-    logBar:SetPoint("BOTTOMLEFT", logScroll, "BOTTOMRIGHT", -2,  4)
+    logBar:SetPoint("TOPLEFT", logScroll, "TOPRIGHT", -2, -4)
+    logBar:SetPoint("BOTTOMLEFT", logScroll, "BOTTOMRIGHT", -2, 4)
     logBar:SetValueStep(20)
+    SW.StyleVerticalScrollBar(logBar)
     logBar:SetScript("OnValueChanged", function(self, value)
         logChild:SetPoint("TOPLEFT", logScroll, "TOPLEFT", 0, value)
     end)
@@ -748,30 +920,29 @@ end
 ------------------------------------------------------------------------
 
 function EbonBuilds.SessionHistory.Show(container)
-    if not topPanel then
+    if not rootPanel then
         BuildUI(container)
-        -- Defer data refresh by one frame so parents resolve their sizes first.
-        -- Without this, the initial render after /reload may produce hidden rows.
+        rootPanel:Show()
+        if topPanel then topPanel:Show() end
+        if bottomPanel then bottomPanel:Show() end
         local defer = CreateFrame("Frame")
         defer:SetScript("OnUpdate", function(self)
             self:Hide()
-            logChild:SetWidth(math.max(logScroll:GetWidth() or 0, 450))
-            EbonBuilds.SessionHistory.RefreshSessionList()
-            EbonBuilds.SessionHistory.RefreshLogView()
+            ScheduleLogbookLayout()
         end)
         return
     end
 
-    topPanel:SetParent(container)
-    bottomPanel:SetParent(container)
-    topPanel:Show()
-    bottomPanel:Show()
+    rootPanel:SetParent(container)
+    rootPanel:ClearAllPoints()
+    rootPanel:SetAllPoints(container)
+    rootPanel:Show()
+    if topPanel then topPanel:Show() end
+    if bottomPanel then bottomPanel:Show() end
 
-    logChild:SetWidth(math.max(logScroll:GetWidth() or 0, 450))
     EbonBuilds.SessionHistory.RefreshSessionList()
-    EbonBuilds.SessionHistory.RefreshLogView()
+    ScheduleLogbookLayout()
 
-    -- Periodic refresh while visible so new automation actions appear live
     if not logRefreshTimer then
         logRefreshTimer = CreateFrame("Frame")
         logRefreshTimer._elapsed = 0
@@ -788,8 +959,7 @@ function EbonBuilds.SessionHistory.Show(container)
 end
 
 function EbonBuilds.SessionHistory.Hide()
-    if topPanel    then topPanel:Hide()    end
-    if bottomPanel then bottomPanel:Hide() end
+    if rootPanel then rootPanel:Hide() end
     HideCopyDialog()
     if durationTimer then
         durationTimer:Hide()
@@ -812,4 +982,8 @@ function EbonBuilds.SessionHistory.Init()
         end,
         timeout = 0, whileDead = true, hideOnEscape = true,
     }
+end
+
+function EbonBuilds.SessionHistory.CloseExportDialog()
+    HideCopyDialog()
 end

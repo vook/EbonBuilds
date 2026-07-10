@@ -16,6 +16,10 @@ modules/gear/AffixApply.lua
 modules/gear/AnvilIntegration.lua
 modules/weights/Weights.lua
 modules/ui/MinimapButton.lua
+modules/ui/SiteTheme.lua
+modules/ui/SiteIcons.lua
+modules/ui/SiteWidgets.lua
+modules/ui/MainNav.lua
 modules/ui/MainWindow.lua
 modules/ui/ViewRouter.lua
 modules/ui/BuildList.lua

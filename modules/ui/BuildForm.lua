@@ -5,6 +5,10 @@
 
 EbonBuilds.BuildForm = {}
 
+local SW = EbonBuilds.SiteWidgets
+local ST = EbonBuilds.SiteTheme
+local L  = ST.Layout
+
 local classChangeCallbacks = {}
 
 local function NotifyClassChange()
@@ -72,6 +76,7 @@ local classButtons = {}
 local specButtons  = {}
 local slotButtons  = {}
 local titleBox, commentsBox, publicToggle
+local descScroll, descBar, descMeasure, descContainer
 
 -- Global single-install hook: shift-click links go into the comments editbox
 -- when it is focused. Guarded so we never install twice.
@@ -282,6 +287,68 @@ end
 
 local descriptionPlaceholder
 
+local function UpdateDescriptionScroll(keepCursorVisible)
+    if not descScroll or not commentsBox or not descBar or not descMeasure then return end
+
+    local scrollW = math.max(1, (descScroll:GetWidth() or 0) - 8)
+    commentsBox:SetWidth(scrollW)
+    descMeasure:SetWidth(scrollW)
+
+    local text = commentsBox:GetText() or ""
+    local hasText = text ~= ""
+    local textHeight = 0
+    if hasText then
+        descMeasure:SetText(text)
+        textHeight = descMeasure:GetStringHeight() or 0
+    end
+
+    local visible = descScroll:GetHeight() or 0
+    local contentH = hasText and math.max(textHeight + 10, visible) or visible
+    commentsBox:SetHeight(contentH)
+
+    if not hasText or contentH <= visible then
+        descBar:Hide()
+        if descBar._siteTrack then descBar._siteTrack:Hide() end
+        descBar:SetMinMaxValues(0, 0)
+        descBar:SetValue(0)
+        commentsBox:ClearAllPoints()
+        commentsBox:SetPoint("TOPLEFT", descScroll, "TOPLEFT", 0, 0)
+        return
+    end
+
+    local overflow = contentH - visible
+    descBar:Show()
+    if descBar._siteTrack then descBar._siteTrack:Show() end
+    descBar:SetMinMaxValues(0, overflow)
+    local scrollTop = descBar:GetValue() or 0
+    if scrollTop > overflow then
+        scrollTop = overflow
+        descBar:SetValue(scrollTop)
+    end
+    commentsBox:ClearAllPoints()
+    commentsBox:SetPoint("TOPLEFT", descScroll, "TOPLEFT", 0, scrollTop)
+
+    if keepCursorVisible then
+        local cursorByte = commentsBox:GetCursorPosition() or 0
+        local textBefore = text:sub(1, cursorByte)
+        descMeasure:SetText(textBefore)
+        local cursorY = descMeasure:GetStringHeight() or 0
+        local cursorScreenY = cursorY - scrollTop
+        if cursorScreenY > visible - 20 then
+            descBar:SetValue(math.min(overflow, cursorY - visible + 20))
+        elseif cursorScreenY < 4 then
+            descBar:SetValue(math.max(0, cursorY - 20))
+        end
+    end
+end
+
+local function SyncDescriptionScrollInset()
+    if not descScroll or not descContainer or not descBar then return end
+    local gutter = descBar:IsShown() and 12 or 0
+    descScroll:SetPoint("BOTTOMRIGHT", descContainer, "BOTTOMRIGHT", -(4 + gutter), 4)
+    UpdateDescriptionScroll()
+end
+
 local function RefreshDescriptionPlaceholder()
     if not descriptionPlaceholder or not commentsBox then return end
     if commentsBox:HasFocus() then
@@ -293,18 +360,18 @@ local function RefreshDescriptionPlaceholder()
     else
         descriptionPlaceholder:Hide()
     end
+    UpdateDescriptionScroll()
 end
 
 local function BuildDescriptionField(parent, x, y, height)
+    local DESC_HEADER_H = 30
+
     local lbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     lbl:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
     lbl:SetText("Description:")
 
-    local insertBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    insertBtn:SetWidth(110)
-    insertBtn:SetHeight(20)
-    insertBtn:SetPoint("TOPLEFT", parent, "TOPLEFT", x + 90, y + 2)
-    insertBtn:SetText("+ Insert Echo Link")
+    local insertBtn = SW.CreateOutlineButton(parent, "+ Insert Echo Link", 140)
+    insertBtn:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -30, y)
     insertBtn:SetScript("OnClick", function()
         EbonBuilds.EchoPicker.Show(function(spellId, quality, name)
             local color = QUALITY_COLOR[quality] or "ffffff"
@@ -329,7 +396,8 @@ local function BuildDescriptionField(parent, x, y, height)
     insertBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     local container = CreateFrame("Frame", nil, parent)
-    container:SetPoint("TOPLEFT",     parent, "TOPLEFT",     x,   y - 24)
+    descContainer = container
+    container:SetPoint("TOPLEFT",     parent, "TOPLEFT",     x,   y - DESC_HEADER_H)
     container:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -30, 50)
     container:SetBackdrop({
         bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
@@ -340,22 +408,35 @@ local function BuildDescriptionField(parent, x, y, height)
     container:SetBackdropColor(0, 0, 0, 0.6)
     container:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
 
-    local scroll = CreateFrame("ScrollFrame", "EbonBuildsBuildFormDescriptionSF", container, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT",     container, "TOPLEFT",      4, -4)
-    scroll:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", -4,  4)
+    descScroll = CreateFrame("ScrollFrame", "EbonBuildsBuildFormDescriptionSF", container)
+    descScroll:SetPoint("TOPLEFT", container, "TOPLEFT", 4, -4)
+    descScroll:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", -4, 4)
 
-    local box = CreateFrame("EditBox", nil, scroll)
+    local box = CreateFrame("EditBox", nil, descScroll)
     box:SetMultiLine(true)
     box:SetMaxLetters(0)
     box:SetFont("Fonts\\FRIZQT__.TTF", 12, "")
-    box:SetWidth(420)
     box:SetAutoFocus(false)
     box:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    scroll:SetScrollChild(box)
+    descScroll:SetScrollChild(box)
     commentsBox = box
 
-    -- Hidden FontString used to measure wrapped text height for scroll range
-    local descMeasure = box:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    descBar = CreateFrame("Slider", "EbonBuildsBuildFormDescriptionBar", descScroll, "UIPanelScrollBarTemplate")
+    descBar:SetPoint("TOPLEFT", descScroll, "TOPRIGHT", 2, -2)
+    descBar:SetPoint("BOTTOMLEFT", descScroll, "BOTTOMRIGHT", 2, 2)
+    descBar:Hide()
+    SW.StyleVerticalScrollBar(descBar)
+    EbonBuilds.ScrollWheel.SetupBar(descBar)
+    descBar:SetValueStep(1)
+    descBar:SetScript("OnValueChanged", function(_, value)
+        box:ClearAllPoints()
+        box:SetPoint("TOPLEFT", descScroll, "TOPLEFT", 0, value)
+    end)
+    local wireDescWheel = select(1, EbonBuilds.ScrollWheel.Bind(descBar, 16))
+    wireDescWheel(descScroll)
+    wireDescWheel(box)
+
+    descMeasure = box:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     descMeasure:SetFont("Fonts\\FRIZQT__.TTF", 12, "")
     descMeasure:SetWidth(410)
     descMeasure:Hide()
@@ -383,35 +464,14 @@ local function BuildDescriptionField(parent, x, y, height)
                 descriptionPlaceholder:Hide()
             end
         end
-
-        -- Auto-resize to fit content and track cursor visibility
-        descMeasure:SetText(self:GetText() or "")
-        local textHeight = descMeasure:GetStringHeight() or 0
-        local contentH = math.max(textHeight + 10, scroll:GetHeight())
-        self:SetHeight(contentH)
-
-        local sbar = _G["EbonBuildsBuildFormDescriptionSFScrollBar"]
-        if sbar then
-            local maxScroll = math.max(0, contentH - scroll:GetHeight())
-            sbar:SetMinMaxValues(0, maxScroll)
-
-            -- Measure cursor Y position within the text
-            local cursorByte = self:GetCursorPosition() or 0
-            local textBefore = (self:GetText() or ""):sub(1, cursorByte)
-            descMeasure:SetText(textBefore)
-            local cursorY = descMeasure:GetStringHeight() or 0
-
-            local scrollTop = sbar:GetValue() or 0
-            local visibleH = scroll:GetHeight()
-            local cursorScreenY = cursorY - scrollTop
-
-            if cursorScreenY > visibleH - 20 then
-                sbar:SetValue(math.min(maxScroll, cursorY - visibleH + 20))
-            elseif cursorScreenY < 4 then
-                sbar:SetValue(math.max(0, cursorY - 20))
-            end
-        end
+        SyncDescriptionScrollInset()
+        UpdateDescriptionScroll(self:HasFocus())
     end)
+
+    container:SetScript("OnSizeChanged", function()
+        SyncDescriptionScrollInset()
+    end)
+    SyncDescriptionScrollInset()
 end
 
 ------------------------------------------------------------------------
@@ -428,6 +488,7 @@ local function OnSave()
     if state.title == "" then return end
     local weights = EbonBuildsDB.pendingWeights
     if state.mode == "create" then
+        local talentPoints = EbonBuilds.Build.CaptureTalentPoints(state.class)
         local b = EbonBuilds.Build.Create({
             title = state.title, class = state.class, spec = state.spec,
             comments = state.comments, lockedEchoes = { unpack(state.locked) },
@@ -435,13 +496,14 @@ local function OnSave()
             isPublic = state.isPublic,
             echoWeights = weights,
             scannedAffixes = EbonBuildsDB.pendingScannedAffixes,
+            talentPoints = talentPoints,
         })
         state.mode = "edit"
         state.id   = b.id
         EbonBuilds.Build.SetActive(b.id)
     else
         local build = EbonBuilds.Build.Get(state.id)
-        EbonBuilds.Build.Save(state.id, {
+        local saveData = {
             title = state.title, class = state.class, spec = state.spec,
             comments = state.comments, lockedEchoes = { unpack(state.locked) },
             settings = state.settings,
@@ -449,7 +511,12 @@ local function OnSave()
             echoWeights = weights,
             scannedAffixes = EbonBuildsDB.pendingScannedAffixes
                 or (build and build.scannedAffixes),
-        })
+        }
+        local talentPoints = EbonBuilds.Build.CaptureTalentPoints(state.class)
+        if talentPoints then
+            saveData.talentPoints = talentPoints
+        end
+        EbonBuilds.Build.Save(state.id, saveData)
     end
     EbonBuildsDB._isEditingBuild = nil
     EbonBuildsDB.pendingWeights = nil
@@ -526,7 +593,7 @@ ApplyStateToInputs = function()
     RefreshDescriptionPlaceholder()
     RefreshClassSelection()
     RefreshSpecButtons()
-    publicToggle:SetText(state.isPublic and "Public" or "Make Public")
+    publicToggle._label:SetText(state.isPublic and "Public" or "Make Public")
     for i = 1, #slotButtons do
         local id = state.locked[i]
         local btn = slotButtons[i]
@@ -695,13 +762,11 @@ local function BuildViewFrame()
     header:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -10)
     header:SetText("Build")
 
-    publicToggle = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    publicToggle:SetSize(120, 22)
-    publicToggle:SetPoint("TOPRIGHT", f, "TOPRIGHT", -10, -10)
-    publicToggle:SetText("Make Public")
+    publicToggle = SW.CreateOutlineButton(f, "Make Public", 110)
+    publicToggle:SetPoint("TOPRIGHT", f, "TOPRIGHT", -L.PAD, -L.PAD)
     publicToggle:SetScript("OnClick", function(self)
         state.isPublic = not state.isPublic
-        self:SetText(state.isPublic and "Public" or "Make Public")
+        self._label:SetText(state.isPublic and "Public" or "Make Public")
     end)
 
     BuildClassGrid(f, 10, -36)

@@ -3,6 +3,11 @@
 
 EbonBuilds.AffixView = {}
 
+local ST = EbonBuilds.SiteTheme
+local SW = EbonBuilds.SiteWidgets
+local C  = ST.C
+local L  = ST.Layout
+
 local viewFrame
 local sourceLabel, sourceDropdown
 local scanBtn, scanMineBtn, clearBtn, deleteBtn, exportBtn, importBtn, applyBtn
@@ -230,15 +235,7 @@ end
 
 local function RefreshListScroll()
     if not listScroll or not listChild or not listBar then return end
-    local overflow = math.max(0, listChild:GetHeight() - listScroll:GetHeight())
-    if overflow <= 0 then
-        listBar:Hide()
-        listBar:SetMinMaxValues(0, 0)
-        listChild:SetPoint("TOPLEFT", listScroll, "TOPLEFT", 0, 0)
-    else
-        listBar:Show()
-        listBar:SetMinMaxValues(0, overflow)
-    end
+    SW.ScheduleVerticalScroll(listScroll, listChild, listBar)
 end
 
 local function SortAffixNames(names)
@@ -330,6 +327,9 @@ RefreshSourceDropdown = function()
             end
         end
     end)
+    if EbonBuilds.SiteWidgets and EbonBuilds.SiteWidgets.SyncDropDownLabel then
+        EbonBuilds.SiteWidgets.SyncDropDownLabel(sourceDropdown)
+    end
 end
 
 RefreshList = function()
@@ -372,20 +372,26 @@ RefreshList = function()
     end
 
     local y = 0
+    local ROW_H = 28
+    local ROW_GAP = 4
     for i, name in ipairs(names) do
         local row = nameRows[i]
         if not row then
-            row = listChild:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-            row:SetPoint("LEFT", listChild, "LEFT", 4, 0)
-            row:SetJustifyH("LEFT")
+            row = SW.CreateListRow(listChild, ROW_H)
+            local label = SW.Label(row, "", 12, C.text)
+            label:SetPoint("LEFT", row, "LEFT", 10, 0)
+            label:SetPoint("RIGHT", row, "RIGHT", -10, 0)
+            label:SetJustifyH("LEFT")
+            row._label = label
             nameRows[i] = row
         end
         row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", listChild, "TOPLEFT", 4, -y)
-        row:SetWidth(listChild:GetWidth() - 8)
-        row:SetText("• " .. name)
+        row:SetPoint("TOPLEFT", listChild, "TOPLEFT", 0, -y)
+        row:SetPoint("RIGHT", listChild, "RIGHT", 0, 0)
+        row:SetHeight(ROW_H)
+        row._label:SetText(name)
         row:Show()
-        y = y + (row:GetStringHeight() or 14) + 2
+        y = y + ROW_H + ROW_GAP
     end
 
     listChild:SetHeight(math.max(24, y + 4))
@@ -512,6 +518,7 @@ local function EnsurePreviewDialog()
     scrollBar:SetPoint("TOPLEFT",    scroll, "TOPRIGHT",    -2, -4)
     scrollBar:SetPoint("BOTTOMLEFT", scroll, "BOTTOMRIGHT", -2,  4)
     scrollBar:SetValueStep(16)
+    SW.StyleVerticalScrollBar(scrollBar)
     scrollBar:Hide()
     scrollBar:SetScript("OnValueChanged", function(_, value)
         child:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, value)
@@ -678,16 +685,21 @@ end
 
 local function BuildViewFrame(parent)
     local f = CreateFrame("Frame", nil, parent)
+    SW.FillChrome(f, "mainBg")
 
-    local header = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    header:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -10)
-    header:SetText("Inspected Gear Affixes")
+    local toolbar = CreateFrame("Frame", nil, f)
+    toolbar:SetPoint("TOPLEFT", f, "TOPLEFT", L.PAD, -L.PAD)
+    toolbar:SetPoint("TOPRIGHT", f, "TOPRIGHT", -L.PAD, -L.PAD)
+    toolbar:SetHeight(120)
+    SW.FillChrome(toolbar, "bgElevated")
+    SW.ThinBorder(toolbar, "borderSoft", 1)
 
-    applyBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    applyBtn:SetSize(110, 22)
-    applyBtn:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -34)
-    applyBtn:SetText("Apply from Build")
-    applyBtn:SetScript("OnClick", OnApplyClick)
+    local header = SW.Label(toolbar, "INSPECTED GEAR AFFIXES", 11, C.textMuted, false, "semibold")
+    header:SetPoint("TOPLEFT", toolbar, "TOPLEFT", L.PAD, -10)
+
+    applyBtn = SW.CreateAccentButton(toolbar, "Apply from Build", OnApplyClick)
+    applyBtn:SetSize(130, 28)
+    applyBtn:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -10)
     applyBtn:SetScript("OnEnter", function(self)
         if self._hint then
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -697,16 +709,12 @@ local function BuildViewFrame(parent)
     end)
     applyBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    importBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    importBtn:SetSize(60, 22)
-    importBtn:SetPoint("LEFT", applyBtn, "RIGHT", 6, 0)
-    importBtn:SetText("Import")
+    importBtn = SW.CreateOutlineButton(toolbar, "Import", 72)
+    importBtn:SetPoint("LEFT", applyBtn, "RIGHT", 10, 0)
     importBtn:SetScript("OnClick", OnImportClick)
 
-    exportBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    exportBtn:SetSize(60, 22)
-    exportBtn:SetPoint("LEFT", importBtn, "RIGHT", 6, 0)
-    exportBtn:SetText("Share")
+    exportBtn = SW.CreateOutlineButton(toolbar, "Share", 72)
+    exportBtn:SetPoint("LEFT", importBtn, "RIGHT", 10, 0)
     exportBtn:SetScript("OnClick", OnExportClick)
     exportBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
@@ -716,10 +724,8 @@ local function BuildViewFrame(parent)
     end)
     exportBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    scanMineBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    scanMineBtn:SetSize(80, 22)
-    scanMineBtn:SetPoint("LEFT", exportBtn, "RIGHT", 6, 0)
-    scanMineBtn:SetText("Scan Mine")
+    scanMineBtn = SW.CreateOutlineButton(toolbar, "Scan Mine", 88)
+    scanMineBtn:SetPoint("LEFT", exportBtn, "RIGHT", 10, 0)
     scanMineBtn:SetScript("OnClick", OnScanMineClick)
     scanMineBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
@@ -729,10 +735,8 @@ local function BuildViewFrame(parent)
     end)
     scanMineBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    scanBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    scanBtn:SetSize(105, 22)
-    scanBtn:SetPoint("LEFT", scanMineBtn, "RIGHT", 6, 0)
-    scanBtn:SetText("Scan Inspect")
+    scanBtn = SW.CreateOutlineButton(toolbar, "Scan Inspect", 100)
+    scanBtn:SetPoint("LEFT", scanMineBtn, "RIGHT", 10, 0)
     scanBtn:SetScript("OnClick", OnScanClick)
     scanBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
@@ -743,20 +747,17 @@ local function BuildViewFrame(parent)
     end)
     scanBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    sourceLabel = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    sourceLabel:SetPoint("TOPLEFT",  f, "TOPLEFT",  10, -60)
-    sourceLabel:SetPoint("TOPRIGHT", f, "TOPRIGHT", -10, -60)
+    sourceLabel = SW.Label(toolbar, "Inspect a player, then scan — affixes save to your build for their class.", 11, C.textDim)
+    sourceLabel:SetPoint("TOPLEFT", applyBtn, "BOTTOMLEFT", 0, -12)
+    sourceLabel:SetPoint("TOPRIGHT", toolbar, "TOPRIGHT", -L.PAD, -12)
     sourceLabel:SetJustifyH("LEFT")
-    sourceLabel:SetText("Inspect a player, then scan — affixes save to your build for their class.")
 
-    sourceDropdown = CreateFrame("Frame", "EbonBuildsAffixSourceDrop", f, "UIDropDownMenuTemplate")
-    sourceDropdown:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -78)
-    UIDropDownMenu_SetWidth(sourceDropdown, 180)
+    sourceDropdown = CreateFrame("Frame", "EbonBuildsAffixSourceDrop", toolbar, "UIDropDownMenuTemplate")
+    sourceDropdown:SetPoint("TOPLEFT", sourceLabel, "BOTTOMLEFT", 0, -8)
+    SW.StyleUIDropDown(sourceDropdown, 200)
 
-    deleteBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    deleteBtn:SetSize(60, 22)
-    deleteBtn:SetPoint("LEFT", sourceDropdown, "RIGHT", 8, 2)
-    deleteBtn:SetText("Delete")
+    deleteBtn = SW.CreateOutlineButton(toolbar, "Delete", 72)
+    deleteBtn:SetPoint("LEFT", sourceDropdown, "RIGHT", 12, 0)
     deleteBtn:SetScript("OnClick", function()
         PromptDeleteAffixScan()
     end)
@@ -767,26 +768,34 @@ local function BuildViewFrame(parent)
     end)
     deleteBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    clearBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    clearBtn:SetSize(70, 22)
-    clearBtn:SetPoint("LEFT", deleteBtn, "RIGHT", 6, 0)
-    clearBtn:SetText("Clear All")
+    clearBtn = SW.CreateOutlineButton(toolbar, "Clear All", 84)
+    clearBtn:SetPoint("LEFT", deleteBtn, "RIGHT", 10, 0)
     clearBtn:SetScript("OnClick", function()
         StaticPopup_Show("EBONBUILDS_CLEAR_AFFIXES")
     end)
 
-    listScroll = CreateFrame("ScrollFrame", nil, f)
-    listScroll:SetPoint("TOPLEFT",     f, "TOPLEFT",     10, -108)
-    listScroll:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -28, 10)
+    local listCard = CreateFrame("Frame", nil, f)
+    listCard:SetPoint("TOPLEFT",     toolbar, "BOTTOMLEFT", 0, -10)
+    listCard:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -L.PAD, L.PAD)
+    SW.FillChrome(listCard, "mainBg")
+    SW.ThinBorder(listCard, "borderSoft", 1)
+
+    local listTitle = SW.Label(listCard, "STORED AFFIXES", 11, C.textMuted, false, "semibold")
+    listTitle:SetPoint("TOPLEFT", listCard, "TOPLEFT", L.PAD, -10)
+
+    listScroll = CreateFrame("ScrollFrame", nil, listCard)
+    listScroll:SetPoint("TOPLEFT",     listTitle, "BOTTOMLEFT", 0, -6)
+    listScroll:SetPoint("BOTTOMRIGHT", listCard, "BOTTOMRIGHT", -20, 10)
 
     listChild = CreateFrame("Frame", nil, listScroll)
-    listChild:SetWidth(460)
+    listChild:SetWidth(L.MAIN_W - L.PAD * 4)
     listChild:SetHeight(24)
     listScroll:SetScrollChild(listChild)
 
     listBar = CreateFrame("Slider", nil, listScroll, "UIPanelScrollBarTemplate")
     listBar:SetPoint("TOPLEFT",    listScroll, "TOPRIGHT",    -2, -4)
     listBar:SetPoint("BOTTOMLEFT", listScroll, "BOTTOMRIGHT", -2,  4)
+    SW.StyleVerticalScrollBar(listBar)
     EbonBuilds.ScrollWheel.SetupBar(listBar)
     listBar:SetValueStep(1)
     listWireWheel = select(1, EbonBuilds.ScrollWheel.Bind(listBar, 16))
@@ -795,6 +804,9 @@ local function BuildViewFrame(parent)
     end)
     listWireWheel(listScroll)
     listWireWheel(listChild)
+
+    listScroll:SetScript("OnSizeChanged", RefreshListScroll)
+    listScroll:SetScript("OnShow", RefreshListScroll)
 
     local refreshElapsed = 0
     f:SetScript("OnUpdate", function(_, elapsed)
@@ -830,6 +842,7 @@ function EbonBuilds.AffixView.Mount(container, opts)
     if importBtn then importBtn:Show() end
     if applyBtn then applyBtn:Show() end
     RefreshList()
+    RefreshListScroll()
     viewFrame:Show()
 end
 

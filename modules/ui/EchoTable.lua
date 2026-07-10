@@ -4,6 +4,7 @@
 
 EbonBuilds.EchoTable = {}
 
+local SW = EbonBuilds.SiteWidgets
 local C = EbonBuilds.EchoTableColumns
 local PADDING       = 10
 local TITLE_HEIGHT  = 30
@@ -397,6 +398,7 @@ local function CreateScrollBar(parent, sf)
     bar:SetMinMaxValues(0, 0)
     bar:SetValueStep(1)
     bar:SetValue(0)
+    SW.StyleVerticalScrollBar(bar)
     return bar
 end
 

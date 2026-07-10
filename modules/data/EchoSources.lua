@@ -111,6 +111,91 @@ local function DetectRegion(text)
     return nil
 end
 
+function ES.LookupPerkData(spellId)
+    if not spellId then return nil end
+    local perkDb = (EbonBuilds.EchoOwnership and EbonBuilds.EchoOwnership.GetPerkDatabase())
+        or (ProjectEbonhold and ProjectEbonhold.PerkDatabase)
+    return perkDb and perkDb[spellId]
+end
+
+function ES.ResolveDropSource(spellId, data)
+    data = data or {}
+    local locations = EbonBuilds.EchoLocations
+    if locations and data.groupId and locations[data.groupId] then
+        return locations[data.groupId]
+    end
+
+    local sources = ProjectEbonhold and ProjectEbonhold.PerkDropSources
+    local byGroup = ProjectEbonhold and ProjectEbonhold.PerkDropSourceByGroup
+    if sources and spellId and sources[spellId] then
+        return sources[spellId]
+    end
+    if data.groupId and byGroup and byGroup[data.groupId] then
+        return byGroup[data.groupId]
+    end
+
+    if data.groupId and sources then
+        local perkDb = (EbonBuilds.EchoOwnership and EbonBuilds.EchoOwnership.GetPerkDatabase())
+            or (ProjectEbonhold and ProjectEbonhold.PerkDatabase)
+        if perkDb then
+            for sid, perkData in pairs(perkDb) do
+                if perkData.groupId == data.groupId and sources[sid] then
+                    return sources[sid]
+                end
+            end
+        end
+    end
+
+    local requiresTome = data.requiredSpell and data.requiredSpell ~= 0
+    if data.requiresTome == false then
+        requiresTome = false
+    elseif data.requiresTome == true then
+        requiresTome = true
+    end
+    if not requiresTome then
+        return "No tome required"
+    end
+    return "Unknown"
+end
+
+function ES.ResolveEntryForFilter(entry)
+    if not entry then return entry end
+    if entry._sourceResolved then return entry end
+
+    local spellId = entry.spellId
+    if entry.isSubRow and entry.qualityTier ~= nil and entry.spellIds then
+        spellId = entry.spellIds[entry.qualityTier] or spellId
+    end
+
+    local data = ES.LookupPerkData(spellId)
+    local groupId = entry.groupId or (data and data.groupId)
+    local requiredSpell = data and data.requiredSpell
+    local requiresTome = entry.requiresTome
+    if requiresTome == nil then
+        requiresTome = requiredSpell and requiredSpell ~= 0
+    end
+
+    local dropSource = entry.dropSource
+    if not dropSource or dropSource == "" then
+        dropSource = ES.ResolveDropSource(spellId, {
+            groupId = groupId,
+            requiredSpell = requiredSpell,
+            requiresTome = requiresTome,
+        })
+    end
+
+    return {
+        spellId = spellId,
+        groupId = groupId,
+        dropSource = dropSource,
+        requiresTome = requiresTome,
+        name = entry.name,
+        qualities = entry.qualities,
+        families = entry.families,
+        _sourceResolved = true,
+    }
+end
+
 function ES.IsNoTomeRequired(entry)
     if not entry then return false end
     if entry.requiresTome == false then return true end
@@ -119,7 +204,12 @@ function ES.IsNoTomeRequired(entry)
 end
 
 function ES.IsUnknownSource(entry)
+    entry = ES.ResolveEntryForFilter(entry)
     if not entry or ES.IsNoTomeRequired(entry) then return false end
+    local info = ES.Classify(entry.groupId, entry.dropSource)
+    if info.kind == "raid" or info.kind == "open_world" then
+        return false
+    end
     local text = NormalizeText(entry.dropSource or "")
     return text == "" or text == "unknown"
 end
@@ -167,6 +257,7 @@ function ES.Classify(groupId, dropSource)
 end
 
 function ES.EntryFilterKey(entry)
+    entry = ES.ResolveEntryForFilter(entry)
     if not entry then return nil end
     if ES.IsNoTomeRequired(entry) then
         return "special:no_tome"
@@ -185,6 +276,7 @@ function ES.EntryFilterKey(entry)
 end
 
 function ES.MatchesSelection(entry, selKey)
+    entry = ES.ResolveEntryForFilter(entry)
     if not selKey or not entry then return false end
 
     if selKey == "special:no_tome" then
@@ -238,4 +330,46 @@ function ES.FilterLabel(selected)
     local count = ES.CountSelected(selected)
     if count == 0 then return "All sources" end
     return "Sources (" .. count .. ")"
+end
+
+local HEADER_LABELS = {
+    special = "Other",
+    open_world = "Open World",
+    raid = "Raids",
+}
+
+function ES.BuildFilterMenuRows(selected, onChanged)
+    local rows = {}
+    rows[#rows + 1] = {
+        text = "Clear all filters",
+        onClick = function()
+            ES.ClearSelection(selected)
+            if onChanged then onChanged() end
+        end,
+    }
+
+    local lastKind = nil
+    for i = 1, #ES.FILTER_OPTIONS do
+        local opt = ES.FILTER_OPTIONS[i]
+        if opt.kind ~= lastKind then
+            rows[#rows + 1] = {
+                kind = "header",
+                text = HEADER_LABELS[opt.kind] or "Other",
+            }
+            lastKind = opt.kind
+        end
+        rows[#rows + 1] = {
+            text = opt.label,
+            checked = selected[opt.key] and true or false,
+            onClick = function()
+                if selected[opt.key] then
+                    selected[opt.key] = nil
+                else
+                    selected[opt.key] = true
+                end
+                if onChanged then onChanged() end
+            end,
+        }
+    end
+    return rows
 end

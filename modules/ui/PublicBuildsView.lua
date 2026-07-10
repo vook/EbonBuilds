@@ -4,23 +4,15 @@
 
 EbonBuilds.PublicBuildsView = {}
 
+local SW = EbonBuilds.SiteWidgets
+local ST = EbonBuilds.SiteTheme
+local C  = ST.C
+local L  = ST.Layout
+
 local PAGE_SIZE  = 8
 local CARD_MARGIN = 4
 local CARD_HEIGHT = 74
 local LOCKED_ICON_SIZE = 22
-
-local CLASS_COLORS = {
-    WARRIOR     = { 0.78, 0.61, 0.43 },
-    PALADIN     = { 0.96, 0.55, 0.73 },
-    HUNTER      = { 0.67, 0.83, 0.45 },
-    ROGUE       = { 1.0,  0.96, 0.41 },
-    PRIEST      = { 1.0,  1.0,  1.0  },
-    DEATHKNIGHT = { 0.77, 0.12, 0.23 },
-    SHAMAN      = { 0.0,  0.44, 0.87 },
-    MAGE        = { 0.41, 0.8,  0.94 },
-    WARLOCK     = { 0.58, 0.51, 0.79 },
-    DRUID       = { 1.0,  0.49, 0.04 },
-}
 
 local viewFrame
 local cardPool   = {}
@@ -59,7 +51,16 @@ end
 -- Filter dropdowns
 ------------------------------------------------------------------------
 
-local RefreshView, GetFilteredBuilds
+local RefreshView, GetFilteredBuilds, StyleFilterDropdowns
+
+local function StyleFilterDropdownsImpl()
+    if not classDropdown or not specDropdown then return end
+    SW.StyleUIDropDown(classDropdown, 130)
+    SW.StyleUIDropDown(specDropdown, 130)
+    SW.SyncDropDownLabel(classDropdown)
+    SW.SyncDropDownLabel(specDropdown)
+end
+StyleFilterDropdowns = StyleFilterDropdownsImpl
 
 local function InitSpecDropdown()
     UIDropDownMenu_Initialize(specDropdown, function()
@@ -71,6 +72,7 @@ local function InitSpecDropdown()
             filterSpec = nil
             UIDropDownMenu_SetText(specDropdown, "All Specs")
             RefreshView()
+            StyleFilterDropdowns()
         end
         info.checked = (filterSpec == nil)
         UIDropDownMenu_AddButton(info)
@@ -85,6 +87,7 @@ local function InitSpecDropdown()
                         filterSpec = i
                         UIDropDownMenu_SetText(specDropdown, entry.name)
                         RefreshView()
+                        StyleFilterDropdowns()
                     end
                     info.checked = (i == filterSpec)
                     UIDropDownMenu_AddButton(info)
@@ -121,6 +124,7 @@ local function InitClassDropdown()
             UIDropDownMenu_SetText(classDropdown, "All Classes")
             InitSpecDropdown()
             RefreshView()
+            StyleFilterDropdowns()
         end
         info.checked = (filterClass == nil)
         UIDropDownMenu_AddButton(info)
@@ -134,6 +138,7 @@ local function InitClassDropdown()
                 UIDropDownMenu_SetText(classDropdown, CLASS_DISPLAY[token])
                 InitSpecDropdown()
                 RefreshView()
+                StyleFilterDropdowns()
             end
             info.checked = (token == filterClass)
             UIDropDownMenu_AddButton(info)
@@ -255,11 +260,8 @@ local function CreateCard(parent)
     end
 
     -- Import button (right side, vertically centered)
-    local importBtn = CreateFrame("Button", nil, card, "UIPanelButtonTemplate")
-    importBtn:SetWidth(70)
-    importBtn:SetHeight(22)
+    local importBtn = SW.CreateOutlineButton(card, "Import", 76)
     importBtn:SetPoint("RIGHT", card, "RIGHT", -10, 0)
-    importBtn:SetText("Import")
     card._importBtn = importBtn
 
     return card
@@ -325,7 +327,7 @@ end
 ------------------------------------------------------------------------
 
 local function PopulateCard(card, build)
-    local cc = CLASS_COLORS[build.class] or { 0.5, 0.5, 0.5 }
+    local cc = ST.CLASS_COLORS[build.class] or { 0.5, 0.5, 0.5 }
 
     -- Border and stripe color by class
     card:SetBackdropBorderColor(cc[1], cc[2], cc[3], 0.8)
@@ -376,23 +378,36 @@ local function PopulateCard(card, build)
     -- Import / Update button (builds already loaded and up-to-date are hidden by GetFilteredBuilds)
     local localCopy = FindImportedCopy(build.id)
     if localCopy and build.lastModified ~= localCopy._importedAt then
-        card._importBtn:SetText("Update")
+        card._importBtn._label:SetText("Update")
         card._importBtn:Enable()
+        card._importBtn:SetAlpha(1)
         card._importBtn:SetScript("OnClick", function()
             UpdateLocalBuild(localCopy, build)
         end)
     else
-        card._importBtn:SetText("Import")
+        card._importBtn._label:SetText("Import")
         card._importBtn:Enable()
+        card._importBtn:SetAlpha(1)
         card._importBtn:SetScript("OnClick", function()
             ImportBuild(build)
         end)
     end
 end
 
+local function SetOutlineEnabled(btn, enabled)
+    if not btn then return end
+    if enabled then
+        btn:Enable()
+        btn:SetAlpha(1)
+    else
+        btn:Disable()
+        btn:SetAlpha(0.55)
+    end
+end
+
 local function RefreshPaginationControls()
-    if state.page > 1 then prevBtn:Enable() else prevBtn:Disable() end
-    if state.page < state.totalPages then nextBtn:Enable() else nextBtn:Disable() end
+    SetOutlineEnabled(prevBtn, state.page > 1)
+    SetOutlineEnabled(nextBtn, state.page < state.totalPages)
     pageLabel:SetText(string.format("Page %d of %d", state.page, state.totalPages))
 end
 
@@ -404,8 +419,8 @@ local function Render()
         scrollBar:SetMinMaxValues(0, 0)
         scrollBar:SetValue(0)
         pageLabel:SetText("Page 1 of 1")
-        prevBtn:Disable()
-        nextBtn:Disable()
+        SetOutlineEnabled(prevBtn, false)
+        SetOutlineEnabled(nextBtn, false)
         if noBuildsLabel then noBuildsLabel:Show() end
         return
     end
@@ -512,15 +527,12 @@ local function BuildViewFrame(parent)
 
     -- Bottom bar: pagination controls
     local bottomBar = CreateFrame("Frame", nil, f)
-    bottomBar:SetPoint("BOTTOMLEFT",  f, "BOTTOMLEFT",  10, 10)
-    bottomBar:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 10)
-    bottomBar:SetHeight(24)
+    bottomBar:SetPoint("BOTTOMLEFT",  f, "BOTTOMLEFT",  L.PAD, L.PAD)
+    bottomBar:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -L.PAD, L.PAD)
+    bottomBar:SetHeight(36)
 
-    prevBtn = CreateFrame("Button", nil, bottomBar, "UIPanelButtonTemplate")
-    prevBtn:SetWidth(80)
-    prevBtn:SetHeight(22)
+    prevBtn = SW.CreateOutlineButton(bottomBar, "Previous", 88)
     prevBtn:SetPoint("LEFT", bottomBar, "LEFT", 0, 0)
-    prevBtn:SetText("Previous")
     prevBtn:SetScript("OnClick", function()
         if state.page > 1 then
             state.page = state.page - 1
@@ -529,11 +541,8 @@ local function BuildViewFrame(parent)
         end
     end)
 
-    nextBtn = CreateFrame("Button", nil, bottomBar, "UIPanelButtonTemplate")
-    nextBtn:SetWidth(80)
-    nextBtn:SetHeight(22)
+    nextBtn = SW.CreateOutlineButton(bottomBar, "Next", 72)
     nextBtn:SetPoint("RIGHT", bottomBar, "RIGHT", 0, 0)
-    nextBtn:SetText("Next")
     nextBtn:SetScript("OnClick", function()
         if state.page < state.totalPages then
             state.page = state.page + 1
@@ -548,40 +557,40 @@ local function BuildViewFrame(parent)
 
     -- Filter bar: class dropdown, spec dropdown, refresh button
     local filterBar = CreateFrame("Frame", nil, f)
-    filterBar:SetPoint("TOPLEFT", sub, "BOTTOMLEFT", 0, -8)
-    filterBar:SetPoint("RIGHT",   f,   "RIGHT",     -10, 0)
-    filterBar:SetHeight(24)
+    filterBar:SetPoint("TOPLEFT", sub, "BOTTOMLEFT", 0, -10)
+    filterBar:SetPoint("RIGHT",   f,   "RIGHT",     -L.PAD, 0)
+    filterBar:SetHeight(32)
 
     classDropdown = CreateFrame("Frame", "EbonBuildsPubClassDrop", filterBar, "UIDropDownMenuTemplate")
     classDropdown:SetPoint("LEFT", filterBar, "LEFT", 0, 0)
-    UIDropDownMenu_SetWidth(classDropdown, 130)
 
     specDropdown = CreateFrame("Frame", "EbonBuildsPubSpecDrop", filterBar, "UIDropDownMenuTemplate")
-    specDropdown:SetPoint("LEFT", classDropdown, "RIGHT", 4, 0)
-    UIDropDownMenu_SetWidth(specDropdown, 130)
+    specDropdown:SetPoint("LEFT", classDropdown, "RIGHT", 8, 0)
 
     filterClass = EbonBuilds.Build.PlayerClassToken()
     filterSpec = nil
     InitClassDropdown()
     InitSpecDropdown()
+    StyleFilterDropdowns()
 
-    refreshBtn = CreateFrame("Button", nil, filterBar, "UIPanelButtonTemplate")
-    refreshBtn:SetWidth(60)
-    refreshBtn:SetHeight(22)
-    refreshBtn:SetPoint("LEFT", specDropdown, "RIGHT", 4, 0)
-    refreshBtn:SetText("Reload")
+    refreshBtn = SW.CreateOutlineButton(filterBar, "Reload", 88)
+    refreshBtn:SetPoint("LEFT", specDropdown, "RIGHT", 12, 0)
     refreshBtn:SetScript("OnClick", function()
-        EbonBuilds.Sync.RequestSync()
+        if refreshBtn:IsEnabled() then
+            EbonBuilds.Sync.RequestSync()
+        end
     end)
     refreshBtn:SetScript("OnUpdate", function()
         if not f:IsVisible() then return end
         local remaining = EbonBuilds.Sync.GetCooldownRemaining()
         if remaining > 0 then
             refreshBtn:Disable()
-            refreshBtn:SetText("Wait " .. remaining .. "s")
+            refreshBtn:SetAlpha(0.55)
+            refreshBtn._label:SetText("Wait " .. remaining .. "s")
         else
             refreshBtn:Enable()
-            refreshBtn:SetText("Reload")
+            refreshBtn:SetAlpha(1)
+            refreshBtn._label:SetText("Reload")
         end
     end)
 
@@ -610,6 +619,7 @@ local function BuildViewFrame(parent)
     scrollBar:SetValueStep(20)
     scrollBar:SetMinMaxValues(0, 0)
     scrollBar:SetValue(0)
+    SW.StyleVerticalScrollBar(scrollBar)
 
     WireScrollBar()
     return f
@@ -629,6 +639,8 @@ function EbonBuilds.PublicBuildsView.Mount(container)
     -- Ensure scrollChild has proper width before rendering
     local w = viewFrame:GetWidth()
     if w and w > 0 then scrollChild:SetWidth(w - 24) end
+
+    StyleFilterDropdowns()
 
     state.builds     = GetFilteredBuilds()
     state.page       = 1

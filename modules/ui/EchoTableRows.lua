@@ -111,6 +111,7 @@ local function BuildBestByName()
                     spellId = spellId, quality = data.quality, qualities = {},
                     families = data.families or {}, classMask = mask, spellIds = {},
                     requiresTome = false, tomeSpellId = nil,
+                    groupId = data.groupId, requiredSpell = data.requiredSpell,
                 }
                 best[name] = existing
             else
@@ -119,6 +120,10 @@ local function BuildBestByName()
                     existing.spellId  = spellId
                     existing.quality  = data.quality
                     existing.families = data.families or {}
+                    existing.groupId = data.groupId
+                    existing.requiredSpell = data.requiredSpell
+                elseif not existing.groupId and data.groupId then
+                    existing.groupId = data.groupId
                 end
             end
             local rs = data.requiredSpell
@@ -200,15 +205,28 @@ local function CountQualities(qualities)
     return n, onlyQ
 end
 
-local function MakeEntryFields(entry, name)
+local function MakeEntryFields(entry, name, spellId)
+    local ES = EbonBuilds.EchoSources
+    local groupId = entry.groupId
+    local requiresTome = entry.requiresTome == true
+    local dropSource = nil
+    if ES and ES.ResolveDropSource then
+        dropSource = ES.ResolveDropSource(spellId, {
+            groupId = groupId,
+            requiredSpell = entry.requiredSpell,
+            requiresTome = requiresTome,
+        })
+    end
     return {
         name          = name,
         qualities     = entry.qualities,
         families      = entry.families,
         classMask     = entry.classMask or 0,
         spellIds      = entry.spellIds,
-        requiresTome  = entry.requiresTome == true,
+        requiresTome  = requiresTome,
         tomeSpellId   = entry.tomeSpellId,
+        groupId       = groupId,
+        dropSource    = dropSource,
     }
 end
 
@@ -235,7 +253,7 @@ function EbonBuilds.EchoTableRows.BuildSortedList()
         if qCount <= 1 then
             local q = onlyQ or entry.quality or 0
             local sid = (entry.spellIds and entry.spellIds[q]) or entry.spellId
-            local fields = MakeEntryFields(entry, name)
+            local fields = MakeEntryFields(entry, name, sid)
             list[#list + 1] = {
                 spellId       = sid,
                 name          = name,
@@ -250,9 +268,11 @@ function EbonBuilds.EchoTableRows.BuildSortedList()
                 spellIds      = fields.spellIds,
                 requiresTome  = fields.requiresTome,
                 tomeSpellId   = fields.tomeSpellId,
+                groupId       = fields.groupId,
+                dropSource    = fields.dropSource,
             }
         else
-            local fields = MakeEntryFields(entry, name)
+            local fields = MakeEntryFields(entry, name, entry.spellId)
             list[#list + 1] = {
                 spellId       = entry.spellId,
                 name          = name,
@@ -267,11 +287,14 @@ function EbonBuilds.EchoTableRows.BuildSortedList()
                 spellIds      = fields.spellIds,
                 requiresTome  = fields.requiresTome,
                 tomeSpellId   = fields.tomeSpellId,
+                groupId       = fields.groupId,
+                dropSource    = fields.dropSource,
             }
 
             for q = 0, 4 do
                 if entry.qualities[q] then
                     local sid = entry.spellIds and entry.spellIds[q]
+                    local subFields = MakeEntryFields(entry, name, sid or entry.spellId)
                     list[#list + 1] = {
                         spellId       = sid or entry.spellId,
                         name          = name,
@@ -280,11 +303,13 @@ function EbonBuilds.EchoTableRows.BuildSortedList()
                         isSingleRow   = false,
                         isGroupHeader = false,
                         isSubRow      = true,
-                        qualities     = fields.qualities,
-                        families      = fields.families,
-                        classMask     = fields.classMask,
-                        spellIds      = fields.spellIds,
-                        requiresTome  = fields.requiresTome,
+                        qualities     = subFields.qualities,
+                        families      = subFields.families,
+                        classMask     = subFields.classMask,
+                        spellIds      = subFields.spellIds,
+                        requiresTome  = subFields.requiresTome,
+                        groupId       = subFields.groupId,
+                        dropSource    = subFields.dropSource,
                     }
                 end
             end
@@ -471,6 +496,9 @@ function EbonBuilds.EchoTableRows.SyncPolicyDropdown(dropdown)
     local policy = EbonBuilds.Build.GetEchoPolicy(dropdown._echoName)
     local info = EbonBuilds.Build.GetEchoPolicyInfo(policy)
     UIDropDownMenu_SetText(dropdown, info.short or "Normal")
+    if EbonBuilds.SiteWidgets and EbonBuilds.SiteWidgets.SyncDropDownLabel then
+        EbonBuilds.SiteWidgets.SyncDropDownLabel(dropdown)
+    end
 end
 
 local function ShowPolicyTooltip(owner, echoName)
@@ -534,9 +562,18 @@ local function RestoreSharedDropDownLists()
 end
 
 local function HidePolicyPopup()
-    if policyPopup and policyPopup._root then
+    if not policyPopup then return end
+    if policyPopup._root then
         policyPopup._root:Hide()
     end
+    policyPopup._anchor = nil
+end
+
+local function IsPolicyPopupOpenFor(anchor)
+    return policyPopup
+        and policyPopup._root
+        and policyPopup._root:IsShown()
+        and policyPopup._anchor == anchor
 end
 
 local function FindMainWindowFrame(anchor)
@@ -554,7 +591,16 @@ local function FindMainWindowFrame(anchor)
 end
 
 local function EnsurePolicyPopup()
+    if policyPopup and not policyPopup._siteStyled then
+        if policyPopup._root then policyPopup._root:Hide() end
+        policyPopup = nil
+    end
     if policyPopup then return policyPopup end
+
+    local SW = EbonBuilds.SiteWidgets
+    local ST = EbonBuilds.SiteTheme
+    local C  = ST.C
+    local FLAT = ST.FLAT
 
     local root = CreateFrame("Frame", "EbonBuildsPolicyPopupRoot", UIParent)
     root:SetFrameStrata("DIALOG")
@@ -570,13 +616,8 @@ local function EnsurePolicyPopup()
     local f = CreateFrame("Frame", "EbonBuildsPolicyPopup", root)
     f:SetFrameLevel(10)
     f:EnableMouse(true)
-    f:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 32,
-        insets = { left = 11, right = 12, top = 12, bottom = 11 },
-    })
-    f:SetBackdropColor(0, 0, 0, 0.92)
+    SW.Fill(f, "bgElevated")
+    f._border = SW.ThinBorder(f, "border", 1)
     f:SetScript("OnMouseDown", function() end)
 
     f.rows = {}
@@ -588,20 +629,23 @@ local function EnsurePolicyPopup()
         row._policyId = p.id
 
         row._highlight = row:CreateTexture(nil, "BACKGROUND")
-        row._highlight:SetAllPoints(row)
-        row._highlight:SetTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
-        row._highlight:SetBlendMode("ADD")
+        row._highlight:SetTexture(FLAT)
+        row._highlight:SetVertexColor(unpack(C.accentBg12))
         row._highlight:Hide()
 
-        row._title = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row._title:SetPoint("TOPLEFT", row, "TOPLEFT", POLICY_MENU_PAD_X, -3)
-        row._title:SetText(p.title)
+        row._title = SW.Label(row, p.title, 11, C.text, false, "medium")
+        row._title:SetPoint("TOPLEFT", row, "TOPLEFT", POLICY_MENU_PAD_X, -4)
+        row._title:SetPoint("RIGHT", row, "RIGHT", -POLICY_MENU_PAD_X, 0)
+        row._title:SetJustifyH("LEFT")
 
-        row._desc = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        row._desc = SW.Label(row, p.menuDesc or p.desc or "", 10, C.textMuted)
         row._desc:SetPoint("TOPLEFT", row._title, "BOTTOMLEFT", 0, -1)
         row._desc:SetPoint("RIGHT", row, "RIGHT", -POLICY_MENU_PAD_X, 0)
         row._desc:SetJustifyH("LEFT")
-        row._desc:SetText(p.menuDesc or p.desc or "")
+
+        row._highlight:ClearAllPoints()
+        row._highlight:SetPoint("TOPLEFT", row._title, "TOPLEFT", -6, 2)
+        row._highlight:SetPoint("BOTTOMRIGHT", row._desc, "BOTTOMRIGHT", 6, -2)
 
         local function SelectPolicyRow(self)
             local popup = policyPopup
@@ -630,6 +674,7 @@ local function EnsurePolicyPopup()
 
     f._root = root
     f._backdrop = backdrop
+    f._siteStyled = true
     policyPopup = f
     return f
 end
@@ -695,6 +740,9 @@ function EbonBuilds.EchoTableRows.CreatePolicyDropdown(parent, opts)
         C.AnchorColumnRight(dd, parent, inset, colW)
     end
     UIDropDownMenu_SetWidth(dd, width)
+    if EbonBuilds.SiteWidgets and EbonBuilds.SiteWidgets.StyleUIDropDown then
+        EbonBuilds.SiteWidgets.StyleUIDropDown(dd, width)
+    end
     UIDropDownMenu_SetText(dd, "Normal")
     dd._ebonPolicyMenu = true
     EnsurePolicyDropDownHooks()
@@ -705,7 +753,7 @@ function EbonBuilds.EchoTableRows.CreatePolicyDropdown(parent, opts)
     local ddButton = _G[dd:GetName() .. "Button"]
     if ddButton then
         ddButton:SetScript("OnClick", function()
-            if policyPopup and policyPopup:IsShown() and policyPopup._anchor == dd then
+            if IsPolicyPopupOpenFor(dd) then
                 HidePolicyPopup()
                 return
             end
@@ -791,7 +839,6 @@ function EbonBuilds.EchoTableRows.SyncTomeOwnedDisplay(frame, arg)
         return
     end
     frame:Show()
-    frame._bg:Show()
 
     if owned == nil and EbonBuilds.EchoOwnership then
         owned = EbonBuilds.EchoOwnership.IsAccountOwned(name, spellIds, groupId, spellId)
@@ -800,10 +847,9 @@ function EbonBuilds.EchoTableRows.SyncTomeOwnedDisplay(frame, arg)
     end
     frame._owned = owned
 
-    if owned then
-        frame._check:Show()
-    else
-        frame._check:Hide()
+    if frame._checkbox then
+        frame._checkbox:Show()
+        frame._checkbox:SetChecked(owned and true or false)
     end
 end
 
@@ -824,19 +870,10 @@ function EbonBuilds.EchoTableRows.CreateTomeOwnedDisplay(row, opts)
         C.AnchorColumnRight(frame, row, rightInset, width)
     end
 
-    local bg = frame:CreateTexture(nil, "BORDER")
-    bg:SetSize(16, 16)
-    bg:SetPoint("CENTER", frame, "CENTER", 0, 0)
-    bg:SetTexture("Interface\\Buttons\\UI-CheckBox-Up")
-    bg:SetAlpha(0.8)
-    frame._bg = bg
-
-    local check = frame:CreateTexture(nil, "ARTWORK")
-    check:SetSize(14, 14)
-    check:SetPoint("CENTER", bg, "CENTER", 0, 0)
-    check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
-    check:Hide()
-    frame._check = check
+    local SW = EbonBuilds.SiteWidgets
+    local box = SW.CreateCheckbox(frame, { displayOnly = true, size = 16 })
+    box:SetPoint("CENTER", frame, "CENTER", 0, 0)
+    frame._checkbox = box
 
     frame:EnableMouse(true)
     frame:SetScript("OnEnter", function(self)
@@ -868,10 +905,26 @@ end
 
 -- Tooltip helpers -------------------------------------------------------
 
-local function ShowMultiRankEchoTooltip(owner, entry)
-    if not entry then return end
+local TOOLTIP_MIN_WIDTH = 360
+local TOOLTIP_DESC_WIDTH = 420
+
+local function GetTooltipUtils()
+    return _G.utils
+end
+
+local function ResolveTooltipStacks(spellId)
+    local stacks = 1
+    local db = (EbonBuilds.EchoOwnership and EbonBuilds.EchoOwnership.GetPerkDatabase())
+        or (ProjectEbonhold and ProjectEbonhold.PerkDatabase)
+    if db and spellId and db[spellId] and db[spellId].maxStack then
+        stacks = db[spellId].maxStack
+    end
+    return stacks
+end
+
+local function PrepareEchoTooltip(owner)
     local anchor = "ANCHOR_RIGHT"
-    if owner.GetBottom then
+    if owner and owner.GetBottom then
         local bottom = owner:GetBottom()
         if bottom and bottom < 220 then
             anchor = "ANCHOR_BOTTOMRIGHT"
@@ -880,8 +933,53 @@ local function ShowMultiRankEchoTooltip(owner, entry)
     GameTooltip:SetOwner(owner, anchor)
     GameTooltip:ClearLines()
     if GameTooltip.SetMinimumWidth then
-        GameTooltip:SetMinimumWidth(340)
+        GameTooltip:SetMinimumWidth(TOOLTIP_MIN_WIDTH)
     end
+    if GameTooltip.SetMaximumWidth then
+        GameTooltip:SetMaximumWidth(TOOLTIP_DESC_WIDTH + 40)
+    end
+    return anchor
+end
+
+local function TrySetSpellHyperlink(spellId)
+    if not spellId or spellId == 0 then return false end
+    local ok = pcall(function()
+        GameTooltip:SetHyperlink("spell:" .. spellId)
+    end)
+    return ok
+end
+
+local function AddDescriptionFallback(spellId, stacks)
+    local utils = GetTooltipUtils()
+    if utils and utils.AddSpellDescriptionToTooltip then
+        utils.AddSpellDescriptionToTooltip(GameTooltip, spellId, stacks or 1)
+        return true
+    end
+    if utils and utils.GetSpellDescription then
+        local description = utils.GetSpellDescription(spellId, TOOLTIP_DESC_WIDTH, stacks or 1)
+        if description and description ~= "" and description ~= "Click for details" then
+            GameTooltip:AddLine(description, 1, 1, 1, true)
+            return true
+        end
+    end
+    return false
+end
+
+local function AppendTooltipExtraLines(extraLines)
+    if not extraLines then return end
+    for i = 1, #extraLines do
+        local line = extraLines[i]
+        if type(line) == "table" then
+            GameTooltip:AddLine(line.text, line.r or 0.7, line.g or 0.7, line.b or 0.7, line.wrap)
+        elseif type(line) == "string" then
+            GameTooltip:AddLine(line, 0.7, 0.7, 0.7)
+        end
+    end
+end
+
+local function ShowMultiRankEchoTooltip(owner, entry)
+    if not entry then return end
+    PrepareEchoTooltip(owner)
     GameTooltip:AddLine(entry.name, 1, 0.82, 0)
     local hasLine = false
     for q = 0, 4 do
@@ -892,12 +990,8 @@ local function ShowMultiRankEchoTooltip(owner, entry)
                 local color = QUALITY_COLORS[q] or "ffffff"
                 GameTooltip:AddLine(" ")
                 GameTooltip:AddLine(string.format("|cff%s%s|r", color, qname), 1, 1, 1)
-                if utils and utils.GetSpellDescription then
-                    local desc = utils.GetSpellDescription(spellId, 300, 1)
-                    if desc and desc ~= "" and desc ~= "Click for details" then
-                        GameTooltip:AddLine(desc, 1, 1, 1, true)
-                        hasLine = true
-                    end
+                if AddDescriptionFallback(spellId, ResolveTooltipStacks(spellId)) then
+                    hasLine = true
                 end
             end
         end
@@ -911,36 +1005,18 @@ end
 
 local function ShowEchoTooltip(owner, spellId, extraLines)
     if not spellId or spellId == 0 then return end
-    local spellName = GetSpellInfo(spellId)
-    local anchor = "ANCHOR_RIGHT"
-    if owner.GetBottom then
-        local bottom = owner:GetBottom()
-        if bottom and bottom < 220 then
-            anchor = "ANCHOR_BOTTOMRIGHT"
+    PrepareEchoTooltip(owner)
+
+    local stacks = ResolveTooltipStacks(spellId)
+    if not TrySetSpellHyperlink(spellId) then
+        local spellName = GetSpellInfo(spellId)
+        if spellName then
+            GameTooltip:AddLine(spellName, 1, 0.82, 0)
         end
+        AddDescriptionFallback(spellId, stacks)
     end
-    GameTooltip:SetOwner(owner, anchor)
-    GameTooltip:ClearLines()
-    if GameTooltip.SetMinimumWidth then
-        GameTooltip:SetMinimumWidth(340)
-    end
-    if spellName then
-        GameTooltip:AddLine(spellName, 1, 0.82, 0)
-    end
-    if utils and utils.AddSpellDescriptionToTooltip then
-        utils.AddSpellDescriptionToTooltip(GameTooltip, spellId, 1)
-    elseif utils and utils.GetSpellDescription then
-        local description = utils.GetSpellDescription(spellId, 0, 1)
-        if description and description ~= "" then
-            GameTooltip:AddLine(description, 1, 1, 1, true)
-        end
-    end
-    if extraLines then
-        for i = 1, #extraLines do
-            local line = extraLines[i]
-            GameTooltip:AddLine(line.text, line.r or 0.7, line.g or 0.7, line.b or 0.7)
-        end
-    end
+
+    AppendTooltipExtraLines(extraLines)
     GameTooltip:Show()
 end
 
@@ -951,8 +1027,13 @@ local function HideEchoTooltip()
     if GameTooltip.SetMinimumWidth then
         GameTooltip:SetMinimumWidth(0)
     end
+    if GameTooltip.SetMaximumWidth then
+        GameTooltip:SetMaximumWidth(0)
+    end
     GameTooltip:Hide()
 end
+
+EbonBuilds.EchoTableRows.HideEchoTooltip = HideEchoTooltip
 
 local function WireEchoTooltip(frame, spellIdAccessor)
     frame:EnableMouse(true)
@@ -1082,6 +1163,10 @@ local function WireWeightBox(editBox)
         self:ClearFocus()
     end)
     editBox:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
+end
+
+function EbonBuilds.EchoTableRows.WireWeightEditBox(editBox)
+    WireWeightBox(editBox)
 end
 
 local function CreateWeightBox(parentRow, width, boxHeight)

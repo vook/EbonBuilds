@@ -1,92 +1,208 @@
 -- EbonBuilds: modules/ui/MainWindow.lua
--- Responsibility: top-level window shell (800x550) with left column and right panel.
--- Hosts the build list and the view router.
+-- Responsibility: top-level site-styled window shell with left build list and right panel.
 
 EbonBuilds.MainWindow = {}
 
-local WINDOW_WIDTH  = 900
-local WINDOW_HEIGHT = 550
-local LEFT_WIDTH    = 200
-local FRAME_NAME    = "EbonBuildsMainWindow"
+local ST = EbonBuilds.SiteTheme
+local SW = EbonBuilds.SiteWidgets
+local L  = ST.Layout
 
-local function ApplyBackdrop(frame)
-    frame:SetBackdrop({
-        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile     = true,
-        tileSize = 32,
-        edgeSize = 32,
-        insets   = { left = 11, right = 12, top = 12, bottom = 11 },
-    })
+local LEFT_WIDTH = 220
+local FRAME_NAME = "EbonBuildsMainWindow"
+
+local NAV_VIEW_MAP = {
+    welcome       = "myBuild",
+    buildOverview = "myBuild",
+    buildTabs     = "myBuild",
+    buildWizard   = "myBuild",
+    publicBuilds  = "publicBuilds",
+}
+
+local frame
+local bodyRow
+local leftPanel
+local divider
+local rightPanel
+local buildListCollapsed = false
+
+local function ResolveThemeClass(context)
+    if context and context.build and context.build.class then
+        return context.build.class
+    end
+    if EbonBuilds.Build and EbonBuilds.Build.PlayerClassToken then
+        return EbonBuilds.Build.PlayerClassToken()
+    end
+    return select(2, UnitClass("player"))
 end
 
-local function CreateTitleBar(frame)
-    local title = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    title:SetPoint("TOP", frame, "TOP", 0, -16)
-    title:SetText("EbonBuilds")
-
-    local dragRegion = CreateFrame("Frame", nil, frame)
-    dragRegion:SetPoint("TOPLEFT",  frame, "TOPLEFT",  0,   0)
-    dragRegion:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -37, 0)
-    dragRegion:SetHeight(30)
-    dragRegion:EnableMouse(true)
-    dragRegion:RegisterForDrag("LeftButton")
-    dragRegion:SetScript("OnDragStart", function() frame:StartMoving() end)
-    dragRegion:SetScript("OnDragStop",  function() frame:StopMovingOrSizing() end)
+local function ApplyThemeClass(context)
+    if ST and ST.SetAccentClass then
+        ST.SetAccentClass(ResolveThemeClass(context))
+    end
 end
 
-local function CreateCloseButton(frame)
-    local closeBtn = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -5, -5)
-    closeBtn:SetFrameLevel(100)
-    closeBtn:SetScript("OnClick", function() frame:Hide() end)
-    return closeBtn
+local function IsBuildDetailView(viewName)
+    return viewName == "buildOverview" or viewName == "buildTabs"
+end
+
+local function ApplyBodyLayout(viewName)
+    if not frame or not bodyRow or not leftPanel or not rightPanel then return end
+
+    if viewName == "welcome"
+        or viewName == "buildWizard"
+        or viewName == "publicBuilds" then
+        leftPanel:Hide()
+        if divider then divider:Hide() end
+        rightPanel:Show()
+        rightPanel:ClearAllPoints()
+        rightPanel:SetPoint("TOPLEFT", bodyRow, "TOPLEFT", 0, 0)
+        rightPanel:SetPoint("BOTTOMRIGHT", bodyRow, "BOTTOMRIGHT", 0, 0)
+    elseif IsBuildDetailView(viewName) and not buildListCollapsed then
+        -- Build picker: list fills the main window; hide overview + tabs.
+        leftPanel:Show()
+        if divider then divider:Hide() end
+        leftPanel:ClearAllPoints()
+        leftPanel:SetPoint("TOPLEFT", bodyRow, "TOPLEFT", 0, 0)
+        leftPanel:SetPoint("BOTTOMRIGHT", bodyRow, "BOTTOMRIGHT", 0, 0)
+        rightPanel:Hide()
+    elseif IsBuildDetailView(viewName) and buildListCollapsed then
+        -- Build detail: overview sidebar + tabs only.
+        leftPanel:Hide()
+        if divider then divider:Hide() end
+        rightPanel:Show()
+        rightPanel:ClearAllPoints()
+        rightPanel:SetPoint("TOPLEFT", bodyRow, "TOPLEFT", 0, 0)
+        rightPanel:SetPoint("BOTTOMRIGHT", bodyRow, "BOTTOMRIGHT", 0, 0)
+    else
+        leftPanel:Show()
+        if divider then divider:Show() end
+        leftPanel:ClearAllPoints()
+        leftPanel:SetPoint("TOPLEFT", bodyRow, "TOPLEFT", 0, 0)
+        leftPanel:SetPoint("BOTTOMLEFT", bodyRow, "BOTTOMLEFT", 0, 0)
+        leftPanel:SetWidth(LEFT_WIDTH)
+        rightPanel:Show()
+        rightPanel:ClearAllPoints()
+        rightPanel:SetPoint("TOPLEFT", divider, "TOPRIGHT", 8, 0)
+        rightPanel:SetPoint("BOTTOMRIGHT", bodyRow, "BOTTOMRIGHT", 0, 0)
+    end
+
+    if IsBuildDetailView(viewName)
+        and EbonBuilds.BuildOverview
+        and EbonBuilds.BuildOverview.SetDetailPanelVisible then
+        EbonBuilds.BuildOverview.SetDetailPanelVisible(
+            buildListCollapsed and viewName == "buildOverview")
+    end
+
+    if EbonBuilds.BuildList and EbonBuilds.BuildList.Refresh then
+        EbonBuilds.BuildList.Refresh()
+    end
+end
+
+function EbonBuilds.MainWindow.IsBuildListCollapsed()
+    return buildListCollapsed
+end
+
+function EbonBuilds.MainWindow.SetBuildListCollapsed(collapsed)
+    if buildListCollapsed == collapsed then return end
+    buildListCollapsed = collapsed and true or false
+    local viewName = EbonBuilds.ViewRouter and EbonBuilds.ViewRouter.Current()
+    if viewName then ApplyBodyLayout(viewName) end
+    if EbonBuilds.BuildOverview and EbonBuilds.BuildOverview.OnBuildListLayoutChanged then
+        EbonBuilds.BuildOverview.OnBuildListLayoutChanged()
+    end
+end
+
+function EbonBuilds.MainWindow.CollapseBuildList()
+    EbonBuilds.MainWindow.SetBuildListCollapsed(true)
+end
+
+function EbonBuilds.MainWindow.ExpandBuildList()
+    EbonBuilds.MainWindow.SetBuildListCollapsed(false)
+end
+
+function EbonBuilds.MainWindow.ShowBuildPicker()
+    EbonBuilds.MainWindow.SetBuildListCollapsed(false)
+    EbonBuilds.ViewRouter.Show("buildOverview", { keepBuildListExpanded = true })
+end
+
+function EbonBuilds.MainWindow.ShowMyBuildView()
+    local active = EbonBuilds.Build.GetActive()
+    if active then
+        ApplyThemeClass({ build = active })
+        EbonBuilds.ViewRouter.Show("buildOverview", { build = active })
+        return
+    end
+
+    local builds = EbonBuilds.Build.List()
+    if builds and #builds > 0 then
+        ApplyThemeClass(nil)
+        EbonBuilds.MainWindow.ShowBuildPicker()
+        return
+    end
+
+    ApplyThemeClass(nil)
+    EbonBuilds.ViewRouter.Show("welcome")
 end
 
 ------------------------------------------------------------------------
 -- Global settings popup
 ------------------------------------------------------------------------
 
+function EbonBuilds.MainWindow.ApplyWindowOpacity(opacity)
+    if opacity == nil then
+        local gs = EbonBuildsDB and EbonBuildsDB.globalSettings
+        opacity = gs and gs.windowOpacity or 1
+    end
+    if frame then
+        frame:SetAlpha(1)
+    end
+    if SW.SetWindowOpacity then
+        SW.SetWindowOpacity(opacity)
+    end
+end
+
 local function BuildSettingsPopup()
     local popup = CreateFrame("Frame", "EbonBuildsGlobalSettingsPopup", UIParent)
-    popup:SetSize(340, 230)
+    popup:SetSize(340, 270)
     popup:SetPoint("CENTER", UIParent, "CENTER")
     popup:SetFrameStrata("DIALOG")
     popup:SetToplevel(true)
     popup:SetMovable(true)
     popup:EnableMouse(true)
-    popup:SetBackdrop({
-        bgFile   = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile     = true, tileSize = 8, edgeSize = 32,
-        insets   = { left = 11, right = 12, top = 12, bottom = 11 },
-    })
-    popup:SetBackdropColor(0.08, 0.08, 0.08, 1)
-    popup:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+    SW.Fill(popup, "bgElevated")
+    SW.ThinBorder(popup, "border", 1)
     popup:Hide()
 
-    -- Title bar / drag region
-    local title = popup:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    local title = SW.Label(popup, "EbonBuilds Settings", 14, ST.C.text, false, "semibold")
     title:SetPoint("TOP", popup, "TOP", 0, -16)
-    title:SetText("EbonBuilds Settings")
 
     local drag = CreateFrame("Frame", nil, popup)
     drag:SetPoint("TOPLEFT",  popup, "TOPLEFT",  0,   0)
-    drag:SetPoint("TOPRIGHT", popup, "TOPRIGHT", -37, 0)
+    drag:SetPoint("TOPRIGHT", popup, "TOPRIGHT", -40, 0)
     drag:SetHeight(30)
     drag:EnableMouse(true)
     drag:RegisterForDrag("LeftButton")
     drag:SetScript("OnDragStart", function() popup:StartMoving() end)
     drag:SetScript("OnDragStop",  function() popup:StopMovingOrSizing() end)
 
-    -- Close button for popup
-    local closeBtn = CreateFrame("Button", nil, popup, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", popup, "TOPRIGHT", -5, -5)
-    closeBtn:SetScript("OnClick", function() popup:Hide() end)
+    local savedOpacity = 1
 
-    -- Helper: slider with track and value display
-    local function AddSlider(labelText, yAnchor, yOffset, value)
-        local label = popup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local function CloseSettingsPopup()
+        EbonBuilds.MainWindow.ApplyWindowOpacity(savedOpacity)
+        popup:Hide()
+    end
+
+    local closeBtn = SW.CreateNavIconButton(popup, "close", CloseSettingsPopup, { size = 28 })
+    closeBtn:SetPoint("TOPRIGHT", popup, "TOPRIGHT", -8, -8)
+    closeBtn:SetFrameLevel(popup:GetFrameLevel() + 4)
+
+    local function AddSlider(labelText, yAnchor, yOffset, value, minVal, maxVal, step, formatFn, onChange)
+        minVal = minVal or 0.1
+        maxVal = maxVal or 3.0
+        step = step or 0.1
+        formatFn = formatFn or function(v) return string.format("%.1fs", v) end
+
+        local label = SW.Label(popup, labelText, 12, ST.C.text)
         label:SetPoint("TOPLEFT", yAnchor, "BOTTOMLEFT", 0, yOffset)
 
         local slider = CreateFrame("Slider", nil, popup)
@@ -94,44 +210,42 @@ local function BuildSettingsPopup()
         slider:SetWidth(190)
         slider:SetHeight(20)
         slider:SetPoint("TOPLEFT", label, "BOTTOMLEFT", 0, -2)
-        slider:SetMinMaxValues(0.1, 3.0)
-        slider:SetValueStep(0.1)
+        slider:SetMinMaxValues(minVal, maxVal)
+        slider:SetValueStep(step)
         slider:SetValue(value)
         slider:SetThumbTexture("Interface\\Buttons\\UI-SliderBar-Button-Horizontal")
 
         local track = slider:CreateTexture(nil, "BACKGROUND")
-        track:SetTexture("Interface\\Buttons\\WHITE8X8")
+        track:SetTexture(ST.FLAT)
         track:SetVertexColor(0.25, 0.25, 0.25, 1)
         track:SetHeight(6)
         track:SetPoint("CENTER", slider)
         track:SetPoint("LEFT", slider)
         track:SetPoint("RIGHT", slider)
 
-        local valText = popup:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        local valText = SW.Label(popup, "", 11, ST.C.textDim)
         valText:SetPoint("LEFT", slider, "RIGHT", 6, 0)
 
-        local function RefreshLabel()
+        local function RefreshLabel(fromUser)
             local v = slider:GetValue()
-            label:SetText(string.format("%s %.1fs", labelText, v))
-            valText:SetText(string.format("%.1fs", v))
+            label:SetText(string.format("%s %s", labelText, formatFn(v)))
+            valText:SetText(formatFn(v))
+            if fromUser and onChange then onChange(v) end
         end
 
-        slider:SetScript("OnValueChanged", RefreshLabel)
-        RefreshLabel()
+        slider:SetScript("OnValueChanged", function() RefreshLabel(true) end)
+        RefreshLabel(false)
 
         return slider
     end
 
-    -- Action delay (label → flavor text → slider)
-    local delayLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local delayLabel = SW.Label(popup, "Action delay:", 12, ST.C.text)
     delayLabel:SetPoint("TOPLEFT", popup, "TOPLEFT", 24, -44)
-    delayLabel:SetText("Action delay:")
 
-    local delayFlavor = popup:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    local delayFlavor = SW.Label(popup, "Very low values may cause the addon to malfunction.", 10, ST.C.textMuted)
     delayFlavor:SetPoint("TOPLEFT", delayLabel, "BOTTOMLEFT", 0, -2)
     delayFlavor:SetPoint("RIGHT", popup, "RIGHT", -24, 0)
     delayFlavor:SetJustifyH("LEFT")
-    delayFlavor:SetText("Very low values may cause the addon to malfunction.")
 
     local delaySlider = CreateFrame("Slider", nil, popup)
     delaySlider:SetOrientation("HORIZONTAL")
@@ -144,14 +258,14 @@ local function BuildSettingsPopup()
     delaySlider:SetThumbTexture("Interface\\Buttons\\UI-SliderBar-Button-Horizontal")
 
     local delayTrack = delaySlider:CreateTexture(nil, "BACKGROUND")
-    delayTrack:SetTexture("Interface\\Buttons\\WHITE8X8")
+    delayTrack:SetTexture(ST.FLAT)
     delayTrack:SetVertexColor(0.25, 0.25, 0.25, 1)
     delayTrack:SetHeight(6)
     delayTrack:SetPoint("CENTER", delaySlider)
     delayTrack:SetPoint("LEFT", delaySlider)
     delayTrack:SetPoint("RIGHT", delaySlider)
 
-    local delayValText = popup:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    local delayValText = SW.Label(popup, "", 11, ST.C.textDim)
     delayValText:SetPoint("LEFT", delaySlider, "RIGHT", 6, 0)
 
     delaySlider:SetScript("OnValueChanged", function()
@@ -160,108 +274,176 @@ local function BuildSettingsPopup()
     end)
     delaySlider:GetScript("OnValueChanged")()
 
-    -- Toast duration (label → slider, no flavor text)
     local toastSlider = AddSlider("Toast duration:", delaySlider, -14, 3)
 
-    -- Buttons
-    local saveBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
-    saveBtn:SetSize(80, 22)
-    saveBtn:SetPoint("BOTTOM", popup, "BOTTOM", 43, 18)
-    saveBtn:SetText("Save")
-    saveBtn:SetScript("OnClick", function()
+    local opacitySlider = AddSlider(
+        "Window opacity:",
+        toastSlider,
+        -14,
+        1,
+        0.5,
+        1.0,
+        0.05,
+        function(v) return string.format("%d%%", math.floor(v * 100 + 0.5)) end,
+        function(v)
+            EbonBuilds.MainWindow.ApplyWindowOpacity(v)
+        end
+    )
+
+    local saveBtn = SW.CreateAccentButton(popup, "Save", function()
         local gs = EbonBuildsDB.globalSettings
         gs.evalDelay = delaySlider:GetValue()
         gs.toastDuration = toastSlider:GetValue()
+        gs.windowOpacity = opacitySlider:GetValue()
         popup:Hide()
     end)
+    saveBtn:SetSize(80, 28)
+    saveBtn:SetPoint("BOTTOM", popup, "BOTTOM", 43, 18)
 
-    local cancelBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
-    cancelBtn:SetSize(80, 22)
+    local cancelBtn = SW.CreateOutlineButton(popup, "Cancel", 80)
     cancelBtn:SetPoint("BOTTOM", popup, "BOTTOM", -43, 18)
-    cancelBtn:SetText("Cancel")
-    cancelBtn:SetScript("OnClick", function() popup:Hide() end)
+    cancelBtn:SetScript("OnClick", CloseSettingsPopup)
 
     popup:SetScript("OnShow", function()
         local gs = EbonBuildsDB.globalSettings
         delaySlider:SetValue(gs.evalDelay or 2)
         toastSlider:SetValue(gs.toastDuration or 3)
+        savedOpacity = gs.windowOpacity or 1
+        opacitySlider:SetValue(savedOpacity)
     end)
+
+    if type(UISpecialFrames) == "table" then
+        table.insert(UISpecialFrames, "EbonBuildsGlobalSettingsPopup")
+    end
 
     return popup
 end
 
-local function CreateSettingsButton(frame, popup, closeBtn)
-    local btn = CreateFrame("Button", nil, frame)
-    btn:SetSize(20, 20)
-    btn:SetPoint("RIGHT", closeBtn, "LEFT", -2, 0)
-    btn:SetFrameLevel(100)
-
-    local icon = btn:CreateTexture(nil, "OVERLAY")
-    icon:SetTexture("Interface\\Icons\\Trade_Engineering")
-    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-    icon:SetAllPoints(btn)
-
-    btn:SetScript("OnClick", function()
-        if popup:IsShown() then popup:Hide() else popup:Show() end
-    end)
-end
-
-local function CreateLeftColumn(frame)
-    local col = CreateFrame("Frame", nil, frame)
-    col:SetPoint("TOPLEFT",    frame, "TOPLEFT",    14, -34)
-    col:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 14,  14)
-    col:SetWidth(LEFT_WIDTH)
-    return col
-end
-
-local function CreateRightPanel(frame)
-    local panel = CreateFrame("Frame", nil, frame)
-    panel:SetPoint("TOPLEFT",     frame, "TOPLEFT",     14 + LEFT_WIDTH + 6, -34)
-    panel:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -14, 14)
-    return panel
-end
-
 local function BuildFrame()
-    local frame = CreateFrame("Frame", FRAME_NAME, UIParent)
-    frame:SetWidth(WINDOW_WIDTH)
-    frame:SetHeight(WINDOW_HEIGHT)
-    frame:SetPoint("CENTER", UIParent, "CENTER")
-    frame:SetMovable(true)
-    frame:SetFrameStrata("DIALOG")
-    frame:SetToplevel(true)
+    local f
+    f = SW.CreateSiteWindow({
+        name     = FRAME_NAME,
+        width    = L.WIN_W,
+        height   = L.WIN_H,
+        closable = false,
+        onClose  = function()
+            f:Hide()
+            if EbonBuilds.MainNav and EbonBuilds.MainNav.Hide then
+                EbonBuilds.MainNav.Hide()
+            end
+            if f._settingsPopup and f._settingsPopup:IsShown() then
+                f._settingsPopup:Hide()
+            end
+            if EbonBuilds.SessionHistory and EbonBuilds.SessionHistory.HideCopyDialog then
+                EbonBuilds.SessionHistory.HideCopyDialog()
+            end
+        end,
+    })
 
-    ApplyBackdrop(frame)
-    CreateTitleBar(frame)
-    local closeBtn = CreateCloseButton(frame)
+    local body = f.body
 
-    local settingsPopup = BuildSettingsPopup()
-    CreateSettingsButton(frame, settingsPopup, closeBtn)
-    frame._settingsPopup = settingsPopup
+    bodyRow = CreateFrame("Frame", nil, body)
+    bodyRow:SetAllPoints(body)
 
-    frame:Hide()
-    frame:SetScript("OnHide", function()
+    leftPanel = CreateFrame("Frame", nil, bodyRow)
+    leftPanel:SetPoint("TOPLEFT", bodyRow, "TOPLEFT", 0, 0)
+    leftPanel:SetPoint("BOTTOMLEFT", bodyRow, "BOTTOMLEFT", 0, 0)
+    leftPanel:SetWidth(LEFT_WIDTH)
+    SW.FillChrome(leftPanel, "sidebarBg")
+
+    divider = bodyRow:CreateTexture(nil, "ARTWORK")
+    divider:SetTexture(ST.FLAT)
+    divider:SetPoint("TOPLEFT", leftPanel, "TOPRIGHT", 8, 0)
+    divider:SetPoint("BOTTOMLEFT", leftPanel, "BOTTOMRIGHT", 8, 0)
+    divider:SetWidth(1)
+    ST.OnThemeChanged(function()
+        if divider then divider:SetVertexColor(unpack(ST.C.border)) end
+    end)
+    divider:SetVertexColor(unpack(ST.C.border))
+
+    rightPanel = CreateFrame("Frame", nil, bodyRow)
+    rightPanel:SetPoint("TOPLEFT", divider, "TOPRIGHT", 8, 0)
+    rightPanel:SetPoint("BOTTOMRIGHT", bodyRow, "BOTTOMRIGHT", 0, 0)
+
+    local rightContent = CreateFrame("Frame", nil, rightPanel)
+    rightContent:SetAllPoints(rightPanel)
+
+    f._left = leftPanel
+    f._right = rightPanel
+    f._rightContent = rightContent
+    f._divider = divider
+    f._bodyRow = bodyRow
+
+    f._settingsPopup = BuildSettingsPopup()
+
+    if EbonBuilds.MainNav and EbonBuilds.MainNav.Create then
+        EbonBuilds.MainNav.Create(f, {
+            onClose = function()
+                f:Hide()
+                if EbonBuilds.MainNav and EbonBuilds.MainNav.Hide then
+                    EbonBuilds.MainNav.Hide()
+                end
+                if f._settingsPopup and f._settingsPopup:IsShown() then
+                    f._settingsPopup:Hide()
+                end
+                if EbonBuilds.SessionHistory and EbonBuilds.SessionHistory.HideCopyDialog then
+                    EbonBuilds.SessionHistory.HideCopyDialog()
+                end
+            end,
+            onSettings = function()
+                local popup = f._settingsPopup
+                if popup then
+                    if popup:IsShown() then popup:Hide() else popup:Show() end
+                end
+            end,
+        })
+    end
+
+    f:Hide()
+    f:SetScript("OnHide", function()
+        if EbonBuilds.MainNav and EbonBuilds.MainNav.Hide then
+            EbonBuilds.MainNav.Hide()
+        end
         if EbonBuilds.SessionHistory and EbonBuilds.SessionHistory.HideCopyDialog then
             EbonBuilds.SessionHistory.HideCopyDialog()
         end
     end)
     if type(UISpecialFrames) == "table" then
         table.insert(UISpecialFrames, FRAME_NAME)
-        table.insert(UISpecialFrames, "EbonBuildsGlobalSettingsPopup")
     end
-    return frame
+
+    EbonBuilds.ViewRouter.OnChanged(function(viewName, context)
+        ApplyThemeClass(context)
+        local navId = NAV_VIEW_MAP[viewName]
+        if navId and EbonBuilds.MainNav and EbonBuilds.MainNav.SetActiveId then
+            EbonBuilds.MainNav.SetActiveId(navId)
+        end
+        if (viewName == "buildOverview" or viewName == "buildTabs")
+            and not (context and context.keepBuildListExpanded) then
+            buildListCollapsed = true
+        end
+        ApplyBodyLayout(viewName)
+        if viewName == "buildOverview"
+            and EbonBuilds.BuildOverview
+            and EbonBuilds.BuildOverview.OnBuildListLayoutChanged then
+            EbonBuilds.BuildOverview.OnBuildListLayoutChanged()
+        end
+    end)
+
+    return f
 end
 
 function EbonBuilds.MainWindow.Init()
-    local frame = BuildFrame()
-    local left  = CreateLeftColumn(frame)
-    local right = CreateRightPanel(frame)
+    frame = BuildFrame()
 
     EbonBuilds.MainWindow._frame = frame
-    EbonBuilds.MainWindow._left  = left
-    EbonBuilds.MainWindow._right = right
+    EbonBuilds.MainWindow._left  = frame._left
+    EbonBuilds.MainWindow._right = frame._right
 
-    EbonBuilds.ViewRouter.SetContainer(right)
-    EbonBuilds.BuildList.Init(left)
+    EbonBuilds.MainWindow.ApplyWindowOpacity()
+
+    EbonBuilds.ViewRouter.SetContainer(frame._rightContent)
+    EbonBuilds.BuildList.Init(frame._left)
     EbonBuilds.WeightsView.Init()
     EbonBuilds.BuildForm.Init()
     EbonBuilds.SettingsView.Init()
@@ -291,12 +473,7 @@ function EbonBuilds.MainWindow.Init()
 end
 
 function EbonBuilds.MainWindow._ShowInitialView()
-    local active = EbonBuilds.Build.GetActive()
-    if active then
-        EbonBuilds.ViewRouter.Show("buildOverview", { build = active })
-    else
-        EbonBuilds.ViewRouter.Show("welcome")
-    end
+    EbonBuilds.MainWindow.ShowMyBuildView()
 end
 
 SLASH_EbonBuilds1 = "/ebb"
@@ -306,13 +483,27 @@ SlashCmdList["EbonBuilds"] = function()
 end
 
 function EbonBuilds.MainWindow.Toggle()
-    local frame = EbonBuilds.MainWindow._frame
     if not frame then return end
     if frame:IsShown() then
         frame:Hide()
+        if EbonBuilds.MainNav and EbonBuilds.MainNav.Hide then
+            EbonBuilds.MainNav.Hide()
+        end
     else
         EbonBuilds.MainWindow._ShowInitialView()
         frame:Show()
+        if EbonBuilds.MainNav and EbonBuilds.MainNav.Show then
+            EbonBuilds.MainNav.Show()
+        end
+    end
+end
+
+function EbonBuilds.MainWindow.Show()
+    if not frame then return end
+    EbonBuilds.MainWindow._ShowInitialView()
+    frame:Show()
+    if EbonBuilds.MainNav and EbonBuilds.MainNav.Show then
+        EbonBuilds.MainNav.Show()
     end
 end
 
@@ -321,6 +512,5 @@ function EbonBuilds.MainWindow.GetRightPanel()
 end
 
 function EbonBuilds.MainWindow.IsVisible()
-    local frame = EbonBuilds.MainWindow._frame
     return frame and frame:IsVisible()
 end
