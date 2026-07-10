@@ -111,12 +111,10 @@ end
 local function HandleSystemMessage(msg)
     -- WoW 3.3.5a shows this system message when SendAddonMessage WHISPER
     -- targets an offline player: "No player named 'JohnDoe' is currently playing."
-    -- Constant: ERR_CHAT_PLAYER_NOT_FOUND_S
+    if not msg:find("player named", 1, true) then return end
+
     local lower = msg:lower()
-    local isOffline = false
-    if lower:find("no player named", 1, true) then
-        isOffline = true
-    end
+    local isOffline = lower:find("no player named", 1, true) ~= nil
     if not isOffline then return end
 
     local now = Now()
@@ -203,9 +201,17 @@ end
 -- Send queue (rate-limited via OnUpdate, 50 ms between messages)
 ------------------------------------------------------------------------
 
+local function UpdateSyncPump()
+    if not syncFrame then return end
+    if channelRetries.remaining > 0 or #sendQueue > 0 then
+        syncFrame:Show()
+    else
+        syncFrame:Hide()
+    end
+end
+
 local function Enqueue(target, payload)
     if not target or target == "" or not payload then return end
-    -- Reject if target was recently detected as offline
     if failedTargets[target] then
         local t = Now()
         if t < failedTargets[target] then return end
@@ -216,6 +222,7 @@ local function Enqueue(target, payload)
         table.remove(sendQueue, 1)
     end
     sendQueue[#sendQueue + 1] = { target = target, payload = payload }
+    UpdateSyncPump()
 end
 
 local function SendChunked(target, code, streamKey, data)
@@ -660,6 +667,7 @@ function EbonBuilds.Sync.RequestSync()
     channelRetries.remaining = MAX_CHANNEL_RETRIES
     channelRetries.payload = escapedPayload
     channelRetries.nextTime = 0  -- fire immediately on next OnUpdate
+    UpdateSyncPump()
 
     -- 2. Guild broadcast via SendAddonMessage (reliable, but guild-only)
     local guildName = GetGuildInfo("player")
@@ -695,6 +703,7 @@ function EbonBuilds.Sync.Init()
         end
     end)
     syncFrame:SetScript("OnUpdate", function()
+        if channelRetries.remaining <= 0 and #sendQueue == 0 then return end
         local now = Now()
         -- Channel retry loop
         if channelRetries.remaining > 0 and now >= channelRetries.nextTime then
@@ -750,9 +759,10 @@ function EbonBuilds.Sync.Init()
             end
             nextSendTime = now + SEND_DELAY
         end
+        UpdateSyncPump()
     end)
 
-    -- Join and hide the sync channel
+    syncFrame:Hide()
     syncChannelIndex = FindSyncChannel() or JoinChannelByName(SYNC_CHANNEL)
     if syncChannelIndex and syncChannelIndex > 0 then
         Log("Sync channel at index " .. syncChannelIndex)

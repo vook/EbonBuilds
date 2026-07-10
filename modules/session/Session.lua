@@ -7,9 +7,37 @@ EbonBuilds.Session = {}
 
 local POLL_INTERVAL = 2  -- seconds between level checks for reset detection
 
-local maxLevel     = 0   -- highest level seen in the active session
-local pollFrame    = nil
-local pollElapsed  = 0
+local maxLevel      = 0   -- highest level seen in the active session
+local pollScheduled = false
+
+local function SchedulePollTick()
+    if pollScheduled or not EbonBuildsDB.currentSessionIndex then return end
+    if not (C_Timer and C_Timer.After) then return end
+    pollScheduled = true
+    C_Timer.After(POLL_INTERVAL, function()
+        pollScheduled = false
+        if not EbonBuildsDB.currentSessionIndex then return end
+
+        local level = UnitLevel("player")
+        if level == 1 and maxLevel > 1 then
+            EbonBuilds.Session.EndCurrentSession()
+            CreateSession()
+            return
+        end
+        if level > maxLevel then
+            maxLevel = level
+        end
+        SchedulePollTick()
+    end)
+end
+
+local function SyncPollVisibility()
+    if EbonBuildsDB.currentSessionIndex then
+        SchedulePollTick()
+    else
+        pollScheduled = false
+    end
+end
 
 ------------------------------------------------------------------------
 -- Internal helpers
@@ -268,6 +296,7 @@ local function CreateSession()
     table.insert(sessions, 1, session)
     EbonBuildsDB.currentSessionIndex = 1
     maxLevel = UnitLevel("player")
+    SyncPollVisibility()
 
     if EbonBuilds.Automation and EbonBuilds.Automation.ResetRunState then
         EbonBuilds.Automation.ResetRunState()
@@ -323,25 +352,6 @@ local function OnPlayerLevelUp(newLevel)
     end
 end
 
-local function OnPollUpdate(self, dt)
-    pollElapsed = pollElapsed + dt
-    if pollElapsed < POLL_INTERVAL then return end
-    pollElapsed = 0
-
-    local level = UnitLevel("player")
-
-    -- Level reset detection: player went from >1 back to 1
-    if EbonBuildsDB.currentSessionIndex and level == 1 and maxLevel > 1 then
-        EbonBuilds.Session.EndCurrentSession()
-        CreateSession()
-        return
-    end
-
-    if level > maxLevel then
-        maxLevel = level
-    end
-end
-
 ------------------------------------------------------------------------
 -- Public API
 ------------------------------------------------------------------------
@@ -371,6 +381,7 @@ function EbonBuilds.Session.EndCurrentSession()
 
     EbonBuildsDB.currentSessionIndex = nil
     maxLevel = 0
+    SyncPollVisibility()
 end
 
 function EbonBuilds.Session.LogAction(scored, action, targetIndex)
@@ -551,7 +562,5 @@ function EbonBuilds.Session.Init()
         end
     end)
 
-    -- Polling frame for level reset detection without loading screen
-    pollFrame = CreateFrame("Frame", nil, UIParent)
-    pollFrame:SetScript("OnUpdate", OnPollUpdate)
+    SyncPollVisibility()
 end
