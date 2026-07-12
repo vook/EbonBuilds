@@ -1,6 +1,6 @@
 ## Interface: 30300
 ## Title: EbonBuilds
-## Dependencies: ProjectEbonhold
+## OptionalDeps: ProjectEbonhold, ProjectEbonholdEnhanced, !ProjectEbonholdSwitcher
 ## SavedVariables: EbonBuildsDB
 ## SavedVariablesPerCharacter: EbonBuildsCharDB
 

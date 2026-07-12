@@ -2,6 +2,11 @@
 
 All notable changes to EbonBuilds are documented in this file.
 
+## [Unreleased]
+
+### Compatibility
+- EbonBuilds now works with both the server ProjectEbonhold addon and Project Ebonhold Enhanced. The hard TOC dependency was replaced with optional deps only (no LoadWith), and bootstrap waits for whichever backend exposes `_G.ProjectEbonhold`.
+
 ## [1.4.0] - 2026-07-09
 
 ### Stats tracking
