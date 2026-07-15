@@ -816,17 +816,16 @@ local function PersistMissingFilterPrefs()
 end
 
 local function SyncMissingClassFilterUI()
-    local box = missingClassFilterCb and missingClassFilterCb._checkbox
-    if not box or not box.SetChecked then return end
+    local icon = missingClassFilterCb and missingClassFilterCb._icon
+    if not icon or not icon.SetState then return end
     if missingShowAllClasses then
-        box:SetMarkColor({ 0.6, 0.8, 1.0 })
-        box:SetChecked(true)
+        icon:SetState("yes", { 0.35, 0.85, 0.35 })
         if missingClassFilterLabel then
             missingClassFilterLabel:SetText("All Classes")
-            missingClassFilterLabel:SetTextColor(0.6, 0.8, 1.0)
+            missingClassFilterLabel:SetTextColor(0.35, 0.85, 0.35)
         end
     else
-        box:SetChecked(false)
+        icon:SetState(nil)
         if missingClassFilterLabel then
             missingClassFilterLabel:SetText("All Classes")
             missingClassFilterLabel:SetTextColor(0.8, 0.8, 0.8)
@@ -1205,7 +1204,7 @@ local function BuildMissingTab(parent)
     filterRow:SetPoint("TOPRIGHT", controlsRow, "BOTTOMRIGHT", 0, -8)
     filterRow:SetHeight(28)
 
-    local classChip = SW.CreateTriStateFilterChip(filterRow, "All Classes", function()
+    local classChip = SW.CreateIconFilterChip(filterRow, "All Classes", function()
         missingShowAllClasses = not missingShowAllClasses
         SyncMissingClassFilterUI()
         InvalidateMissingCatalog()
@@ -1216,7 +1215,7 @@ local function BuildMissingTab(parent)
         else
             GameTooltip:AddLine("Showing echoes for your class only.", 0.8, 0.8, 0.8, true)
         end
-    end, { "All Classes" })
+    end)
     classChip:SetPoint("LEFT", filterRow, "LEFT", 0, 0)
     missingClassFilterCb = classChip
     missingClassFilterLabel = classChip._label
@@ -1282,7 +1281,7 @@ local function BuildMissingTab(parent)
     end, "Owned Filter", function()
         local mode = missingOwnedFilter
         if mode == "owned" then
-            GameTooltip:AddLine("Showing account-owned echoes only.", 0.8, 0.8, 0.8, true)
+            GameTooltip:AddLine("Showing echoes owned on this character only.", 0.8, 0.8, 0.8, true)
         elseif mode == "unowned" then
             GameTooltip:AddLine("Showing echoes you do not own only.", 0.8, 0.8, 0.8, true)
         else
@@ -1324,7 +1323,7 @@ local function BuildMissingTab(parent)
     tomeHdr:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
         GameTooltip:SetText("Owned", 1, 0.82, 0)
-        GameTooltip:AddLine("Checked when the echo is discovered on your account.", 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine("Checked when the echo is owned on this character.", 0.8, 0.8, 0.8, true)
         GameTooltip:Show()
     end)
     tomeHdr:SetScript("OnLeave", function() GameTooltip:Hide() end)

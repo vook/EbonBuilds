@@ -887,9 +887,9 @@ function EbonBuilds.EchoTableRows.CreateTomeOwnedDisplay(row, opts)
             owned = false
         end
         if owned then
-            GameTooltip:AddLine("Discovered on this account.", 0.5, 1, 0.5, true)
+            GameTooltip:AddLine("Owned on this character.", 0.5, 1, 0.5, true)
         else
-            GameTooltip:AddLine("Not yet discovered on this account.", 0.8, 0.8, 0.8, true)
+            GameTooltip:AddLine("Not owned on this character.", 0.8, 0.8, 0.8, true)
         end
         GameTooltip:Show()
     end)

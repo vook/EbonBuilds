@@ -240,20 +240,19 @@ function EbonBuilds.Filters.SyncOwnedFilterUI(cb, label, mode)
 end
 
 function EbonBuilds.Filters.SyncClassFilterUI(cb, label)
-    local box = cb and cb._checkbox
-    if not box or not box.SetChecked then return end
+    local icon = cb and cb._icon
+    if not icon or not icon.SetState then return end
     if state.showAllClasses then
-        box:SetMarkColor({ 0.6, 0.8, 1.0 })
-        box:SetChecked(true)
+        icon:SetState("yes", FILTER_YES_COLOR)
         if label then
             label:SetText("Show All Classes")
-            label:SetTextColor(0.6, 0.8, 1.0)
+            label:SetTextColor(unpack(FILTER_YES_COLOR))
         end
     else
-        box:SetChecked(false)
+        icon:SetState(nil)
         if label then
             label:SetText("Show All Classes")
-            label:SetTextColor(0.8, 0.8, 0.8)
+            label:SetTextColor(unpack(FILTER_OFF_COLOR))
         end
     end
     if cb.SetChipWidth then cb:SetChipWidth() end
@@ -446,7 +445,7 @@ function EbonBuilds.Filters.Init(parent)
 
     local classChip, tomeChip, multiChip
 
-    classChip = SW.CreateTriStateFilterChip(row2, "Show All Classes", function()
+    classChip = SW.CreateIconFilterChip(row2, "Show All Classes", function()
         state.showAllClasses = not state.showAllClasses
         EbonBuilds.Filters.SyncClassFilterUI(classChip, classChip._label)
         Notify()
@@ -456,7 +455,7 @@ function EbonBuilds.Filters.Init(parent)
         else
             GameTooltip:AddLine("Showing echoes for your class only.", 0.8, 0.8, 0.8, true)
         end
-    end, { "Show All Classes" })
+    end)
     classChip:SetPoint("RIGHT", row2, "RIGHT", 0, 0)
 
     tomeChip = SW.CreateIconFilterChip(row2, "Requires Tome", function()
