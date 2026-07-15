@@ -83,28 +83,30 @@ function EbonBuilds.Filters.PassesRequiresTomeFilter(entry, mode)
     return true
 end
 
+local FILTER_YES_COLOR = { 0.35, 0.85, 0.35 }
+local FILTER_NO_COLOR  = { 1.0, 0.55, 0.2 }
+local FILTER_OFF_COLOR = { 0.8, 0.8, 0.8 }
+
 function EbonBuilds.Filters.SyncRequiresTomeFilterUI(cb, label, mode)
-    local box = cb and cb._checkbox
-    if not box or not box.SetChecked then return end
+    local icon = cb and cb._icon
+    if not icon or not icon.SetState then return end
     if mode == "only" then
-        box:SetMarkColor({ 1.0, 0.82, 0.0 })
-        box:SetChecked(true)
+        icon:SetState("yes", FILTER_YES_COLOR)
         if label then
             label:SetText("Requires Tome")
-            label:SetTextColor(1.0, 0.82, 0.0)
+            label:SetTextColor(unpack(FILTER_YES_COLOR))
         end
     elseif mode == "exclude" then
-        box:SetMarkColor({ 1.0, 0.55, 0.2 })
-        box:SetChecked(true)
-        if label then
-            label:SetText("Does Not Require Tome")
-            label:SetTextColor(1.0, 0.55, 0.2)
-        end
-    else
-        box:SetChecked(false)
+        icon:SetState("no", FILTER_NO_COLOR)
         if label then
             label:SetText("Requires Tome")
-            label:SetTextColor(0.8, 0.8, 0.8)
+            label:SetTextColor(unpack(FILTER_NO_COLOR))
+        end
+    else
+        icon:SetState(nil)
+        if label then
+            label:SetText("Requires Tome")
+            label:SetTextColor(unpack(FILTER_OFF_COLOR))
         end
     end
     if cb.SetChipWidth then cb:SetChipWidth() end
@@ -127,27 +129,111 @@ function EbonBuilds.Filters.CycleRequiresTomeFilter(mode)
 end
 
 function EbonBuilds.Filters.SyncMultiRankFilterUI(cb, label, mode)
-    local box = cb and cb._checkbox
-    if not box or not box.SetChecked then return end
+    local icon = cb and cb._icon
+    if not icon or not icon.SetState then return end
     if mode == "only" then
-        box:SetMarkColor({ 0.6, 0.8, 1.0 })
-        box:SetChecked(true)
+        icon:SetState("yes", FILTER_YES_COLOR)
         if label then
             label:SetText("Multi-Rank")
-            label:SetTextColor(0.6, 0.8, 1.0)
+            label:SetTextColor(unpack(FILTER_YES_COLOR))
         end
     elseif mode == "exclude" then
-        box:SetMarkColor({ 1.0, 0.55, 0.2 })
-        box:SetChecked(true)
-        if label then
-            label:SetText("Exclude Multi-Rank")
-            label:SetTextColor(1.0, 0.55, 0.2)
-        end
-    else
-        box:SetChecked(false)
+        icon:SetState("no", FILTER_NO_COLOR)
         if label then
             label:SetText("Multi-Rank")
-            label:SetTextColor(0.8, 0.8, 0.8)
+            label:SetTextColor(unpack(FILTER_NO_COLOR))
+        end
+    else
+        icon:SetState(nil)
+        if label then
+            label:SetText("Multi-Rank")
+            label:SetTextColor(unpack(FILTER_OFF_COLOR))
+        end
+    end
+    if cb.SetChipWidth then cb:SetChipWidth() end
+end
+
+local ROLLED_FILTER_CYCLE = { "off", "rolled", "unrolled" }
+local OWNED_FILTER_CYCLE = { "off", "owned", "unowned" }
+
+local function CycleNamedTriState(mode, cycle)
+    local current = mode or "off"
+    for i, value in ipairs(cycle) do
+        if value == current then
+            local nextValue = cycle[(i % #cycle) + 1]
+            return nextValue == "off" and nil or nextValue
+        end
+    end
+    return nil
+end
+
+function EbonBuilds.Filters.CycleRolledFilter(mode)
+    return CycleNamedTriState(mode, ROLLED_FILTER_CYCLE)
+end
+
+function EbonBuilds.Filters.PassesRolledFilter(entry, mode)
+    if not mode then return true end
+    if mode == "rolled" then return entry.rolled == true end
+    if mode == "unrolled" then return not entry.rolled end
+    return true
+end
+
+function EbonBuilds.Filters.SyncRolledFilterUI(cb, label, mode)
+    local icon = cb and cb._icon
+    if not icon or not icon.SetState then return end
+    if mode == "rolled" then
+        icon:SetState("yes", FILTER_YES_COLOR)
+        if label then
+            label:SetText("Rolled Echoes")
+            label:SetTextColor(unpack(FILTER_YES_COLOR))
+        end
+    elseif mode == "unrolled" then
+        icon:SetState("no", FILTER_NO_COLOR)
+        if label then
+            label:SetText("Rolled Echoes")
+            label:SetTextColor(unpack(FILTER_NO_COLOR))
+        end
+    else
+        icon:SetState(nil)
+        if label then
+            label:SetText("Rolled Echoes")
+            label:SetTextColor(unpack(FILTER_OFF_COLOR))
+        end
+    end
+    if cb.SetChipWidth then cb:SetChipWidth() end
+end
+
+function EbonBuilds.Filters.CycleOwnedFilter(mode)
+    return CycleNamedTriState(mode, OWNED_FILTER_CYCLE)
+end
+
+function EbonBuilds.Filters.PassesOwnedFilter(entry, mode)
+    if not mode then return true end
+    if mode == "owned" then return entry.owned == true end
+    if mode == "unowned" then return not entry.owned end
+    return true
+end
+
+function EbonBuilds.Filters.SyncOwnedFilterUI(cb, label, mode)
+    local icon = cb and cb._icon
+    if not icon or not icon.SetState then return end
+    if mode == "owned" then
+        icon:SetState("yes", FILTER_YES_COLOR)
+        if label then
+            label:SetText("Owned Echoes")
+            label:SetTextColor(unpack(FILTER_YES_COLOR))
+        end
+    elseif mode == "unowned" then
+        icon:SetState("no", FILTER_NO_COLOR)
+        if label then
+            label:SetText("Owned Echoes")
+            label:SetTextColor(unpack(FILTER_NO_COLOR))
+        end
+    else
+        icon:SetState(nil)
+        if label then
+            label:SetText("Owned Echoes")
+            label:SetTextColor(unpack(FILTER_OFF_COLOR))
         end
     end
     if cb.SetChipWidth then cb:SetChipWidth() end
@@ -373,7 +459,7 @@ function EbonBuilds.Filters.Init(parent)
     end, { "Show All Classes" })
     classChip:SetPoint("RIGHT", row2, "RIGHT", 0, 0)
 
-    tomeChip = SW.CreateTriStateFilterChip(row2, "Requires Tome", function()
+    tomeChip = SW.CreateIconFilterChip(row2, "Requires Tome", function()
         state.requiresTomeFilter = EbonBuilds.Filters.CycleRequiresTomeFilter(state.requiresTomeFilter)
         EbonBuilds.Filters.SyncRequiresTomeFilterUI(tomeChip, tomeChip._label, state.requiresTomeFilter)
         Notify()
@@ -386,10 +472,10 @@ function EbonBuilds.Filters.Init(parent)
         else
             GameTooltip:AddLine("No tome filter active.", 0.8, 0.8, 0.8, true)
         end
-    end, { "Requires Tome", "Does Not Require Tome" })
+    end)
     tomeChip:SetPoint("RIGHT", classChip, "LEFT", -12, 0)
 
-    multiChip = SW.CreateTriStateFilterChip(row2, "Multi-Rank", function()
+    multiChip = SW.CreateIconFilterChip(row2, "Multi-Rank", function()
         state.multipleRanksFilter = EbonBuilds.Filters.CycleMultipleRanksFilter(state.multipleRanksFilter)
         EbonBuilds.Filters.SyncMultiRankFilterUI(multiChip, multiChip._label, state.multipleRanksFilter)
         Notify()
@@ -402,7 +488,7 @@ function EbonBuilds.Filters.Init(parent)
         else
             GameTooltip:AddLine("No multi-rank filter active.", 0.8, 0.8, 0.8, true)
         end
-    end, { "Multi-Rank", "Exclude Multi-Rank" })
+    end)
     multiChip:SetPoint("RIGHT", tomeChip, "LEFT", -12, 0)
 
     EbonBuilds.Filters.SyncClassFilterUI(classChip, classChip._label)

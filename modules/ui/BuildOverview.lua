@@ -694,12 +694,18 @@ local MISS_MAIN_ROW_H = 26
 local MISS_SUB_ROW_H = 24
 local missingRequiresTomeFilter = nil
 local missingMultipleRanksFilter = nil
+local missingRolledFilter = nil -- nil | "rolled" | "unrolled"
+local missingOwnedFilter = nil -- nil | "owned" | "unowned"
 local missingShowAllClasses = false
 local missingSourceFilter = {}
 local missingTomeFilterCb
 local missingTomeFilterLabel
 local missingMultiRankFilterCb
 local missingMultiRankFilterLabel
+local missingRolledFilterCb
+local missingRolledFilterLabel
+local missingOwnedFilterCb
+local missingOwnedFilterLabel
 local missingClassFilterCb
 local missingClassFilterLabel
 local RefreshMissing
@@ -770,6 +776,24 @@ local function LoadMissingFilterPrefs()
             missingMultipleRanksFilter = gs.missingMultipleRanks
         end
     end
+    if gs and (gs.missingRolledFilter == "rolled" or gs.missingRolledFilter == "unrolled") then
+        missingRolledFilter = gs.missingRolledFilter
+    elseif gs and gs.missingOwnershipFilter == "rolled" then
+        -- migrate previous single ownership filter
+        missingRolledFilter = "rolled"
+    else
+        missingRolledFilter = nil
+    end
+    if gs and (gs.missingOwnedFilter == "owned" or gs.missingOwnedFilter == "unowned") then
+        missingOwnedFilter = gs.missingOwnedFilter
+    elseif gs and gs.missingOwnershipFilter == "owned" then
+        missingOwnedFilter = "owned"
+    else
+        missingOwnedFilter = nil
+    end
+    if gs and gs.missingOwnershipFilter ~= nil then
+        gs.missingOwnershipFilter = nil
+    end
     missingSourceFilter = {}
     if gs and gs.missingSourceFilter ~= nil then
         gs.missingSourceFilter = nil
@@ -781,6 +805,11 @@ local function PersistMissingFilterPrefs()
     EbonBuildsDB.globalSettings = EbonBuildsDB.globalSettings or {}
     EbonBuildsDB.globalSettings.missingRequiresTome = missingRequiresTomeFilter
     EbonBuildsDB.globalSettings.missingMultipleRanks = missingMultipleRanksFilter
+    EbonBuildsDB.globalSettings.missingRolledFilter = missingRolledFilter
+    EbonBuildsDB.globalSettings.missingOwnedFilter = missingOwnedFilter
+    if EbonBuildsDB.globalSettings.missingOwnershipFilter ~= nil then
+        EbonBuildsDB.globalSettings.missingOwnershipFilter = nil
+    end
     if EbonBuildsDB.globalSettings.missingSourceFilter ~= nil then
         EbonBuildsDB.globalSettings.missingSourceFilter = nil
     end
@@ -848,6 +877,32 @@ local function SyncMissingMultiRankFilterUI()
     end
 end
 
+local function SyncMissingRolledFilterUI()
+    if EbonBuilds.Filters and EbonBuilds.Filters.SyncRolledFilterUI then
+        EbonBuilds.Filters.SyncRolledFilterUI(
+            missingRolledFilterCb,
+            missingRolledFilterLabel,
+            missingRolledFilter
+        )
+    end
+    if missingRolledFilterCb and missingRolledFilterCb.SetChipWidth then
+        missingRolledFilterCb:SetChipWidth()
+    end
+end
+
+local function SyncMissingOwnedFilterUI()
+    if EbonBuilds.Filters and EbonBuilds.Filters.SyncOwnedFilterUI then
+        EbonBuilds.Filters.SyncOwnedFilterUI(
+            missingOwnedFilterCb,
+            missingOwnedFilterLabel,
+            missingOwnedFilter
+        )
+    end
+    if missingOwnedFilterCb and missingOwnedFilterCb.SetChipWidth then
+        missingOwnedFilterCb:SetChipWidth()
+    end
+end
+
 local function SetMissingTomeFilter(mode, persist)
     missingRequiresTomeFilter = mode
     SyncMissingTomeFilterUI()
@@ -874,6 +929,34 @@ local function CycleMissingMultiRankFilter()
     local nextMode = EbonBuilds.Filters.CycleMultipleRanksFilter(missingMultipleRanksFilter)
     SetMissingMultiRankFilter(nextMode)
     return missingMultipleRanksFilter
+end
+
+local function SetMissingRolledFilter(mode, persist)
+    missingRolledFilter = mode
+    SyncMissingRolledFilterUI()
+    if persist ~= false then
+        PersistMissingFilterPrefs()
+    end
+end
+
+local function CycleMissingRolledFilter()
+    local nextMode = EbonBuilds.Filters.CycleRolledFilter(missingRolledFilter)
+    SetMissingRolledFilter(nextMode)
+    return missingRolledFilter
+end
+
+local function SetMissingOwnedFilter(mode, persist)
+    missingOwnedFilter = mode
+    SyncMissingOwnedFilterUI()
+    if persist ~= false then
+        PersistMissingFilterPrefs()
+    end
+end
+
+local function CycleMissingOwnedFilter()
+    local nextMode = EbonBuilds.Filters.CycleOwnedFilter(missingOwnedFilter)
+    SetMissingOwnedFilter(nextMode)
+    return missingOwnedFilter
 end
 
 local missingSourceMenu
@@ -1138,7 +1221,7 @@ local function BuildMissingTab(parent)
     missingClassFilterCb = classChip
     missingClassFilterLabel = classChip._label
 
-    local tomeChip = SW.CreateTriStateFilterChip(filterRow, "Requires Tome", function()
+    local tomeChip = SW.CreateIconFilterChip(filterRow, "Requires Tome", function()
         CycleMissingTomeFilter()
         SyncMissingTomeFilterUI()
         RefreshMissing()
@@ -1151,12 +1234,12 @@ local function BuildMissingTab(parent)
         else
             GameTooltip:AddLine("No tome filter active.", 0.8, 0.8, 0.8, true)
         end
-    end, { "Requires Tome", "Does Not Require Tome" })
+    end)
     tomeChip:SetPoint("LEFT", classChip, "RIGHT", 12, 0)
     missingTomeFilterCb = tomeChip
     missingTomeFilterLabel = tomeChip._label
 
-    local multiChip = SW.CreateTriStateFilterChip(filterRow, "Multi-Rank", function()
+    local multiChip = SW.CreateIconFilterChip(filterRow, "Multi-Rank", function()
         CycleMissingMultiRankFilter()
         SyncMissingMultiRankFilterUI()
         RefreshMissing()
@@ -1169,15 +1252,53 @@ local function BuildMissingTab(parent)
         else
             GameTooltip:AddLine("No multi-rank filter active.", 0.8, 0.8, 0.8, true)
         end
-    end, { "Multi-Rank", "Exclude Multi-Rank" })
+    end)
     multiChip:SetPoint("LEFT", tomeChip, "RIGHT", 12, 0)
     missingMultiRankFilterCb = multiChip
     missingMultiRankFilterLabel = multiChip._label
+
+    local rolledChip = SW.CreateIconFilterChip(filterRow, "Rolled Echoes", function()
+        CycleMissingRolledFilter()
+        SyncMissingRolledFilterUI()
+        RefreshMissing()
+    end, "Rolled Filter", function()
+        local mode = missingRolledFilter
+        if mode == "rolled" then
+            GameTooltip:AddLine("Showing echoes rolled this run only.", 0.8, 0.8, 0.8, true)
+        elseif mode == "unrolled" then
+            GameTooltip:AddLine("Showing echoes not rolled this run only.", 0.8, 0.8, 0.8, true)
+        else
+            GameTooltip:AddLine("Showing all echoes (rolled filter off).", 0.8, 0.8, 0.8, true)
+        end
+    end)
+    rolledChip:SetPoint("LEFT", multiChip, "RIGHT", 12, 0)
+    missingRolledFilterCb = rolledChip
+    missingRolledFilterLabel = rolledChip._label
+
+    local ownedChip = SW.CreateIconFilterChip(filterRow, "Owned Echoes", function()
+        CycleMissingOwnedFilter()
+        SyncMissingOwnedFilterUI()
+        RefreshMissing()
+    end, "Owned Filter", function()
+        local mode = missingOwnedFilter
+        if mode == "owned" then
+            GameTooltip:AddLine("Showing account-owned echoes only.", 0.8, 0.8, 0.8, true)
+        elseif mode == "unowned" then
+            GameTooltip:AddLine("Showing echoes you do not own only.", 0.8, 0.8, 0.8, true)
+        else
+            GameTooltip:AddLine("Showing all echoes (owned filter off).", 0.8, 0.8, 0.8, true)
+        end
+    end)
+    ownedChip:SetPoint("LEFT", rolledChip, "RIGHT", 12, 0)
+    missingOwnedFilterCb = ownedChip
+    missingOwnedFilterLabel = ownedChip._label
 
     LoadMissingFilterPrefs()
     SyncMissingClassFilterUI()
     SyncMissingTomeFilterUI()
     SyncMissingMultiRankFilterUI()
+    SyncMissingRolledFilterUI()
+    SyncMissingOwnedFilterUI()
     SyncMissingSourceFilterUI()
 
     missingColumnHeader = CreateFrame("Frame", nil, card)
@@ -1821,12 +1942,15 @@ RefreshMissing = function(forceCatalog)
     for _, entry in ipairs(missing) do
         local passesTome = EbonBuilds.Filters.PassesRequiresTomeFilter(entry, missingRequiresTomeFilter)
         local passesMultiRank = EbonBuilds.Filters.PassesMultipleRanksFilter(entry, missingMultipleRanksFilter)
+        local passesRolled = EbonBuilds.Filters.PassesRolledFilter(entry, missingRolledFilter)
+        local passesOwned = EbonBuilds.Filters.PassesOwnedFilter(entry, missingOwnedFilter)
         local passesSearch = EbonBuilds.EchoSearch.Matches(entry, missingSearchText)
         local passesSource = true
         if EbonBuilds.EchoSources then
             passesSource = EbonBuilds.EchoSources.PassesFilter(entry, missingSourceFilter)
         end
-        if passesTome and passesMultiRank and passesSearch and passesSource then
+        if passesTome and passesMultiRank and passesRolled and passesOwned
+                and passesSearch and passesSource then
             filtered[#filtered + 1] = entry
         end
     end
@@ -1835,6 +1959,7 @@ RefreshMissing = function(forceCatalog)
         missingChild.noMatchLabel = missingChild.noMatchLabel or missingChild:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         missingChild.noMatchLabel:SetPoint("TOPLEFT", missingChild, "TOPLEFT", 4, -2)
         if (missingSearchText ~= "" or missingRequiresTomeFilter or missingMultipleRanksFilter
+                or missingRolledFilter or missingOwnedFilter
                 or (EbonBuilds.EchoSources and EbonBuilds.EchoSources.CountSelected(missingSourceFilter) > 0))
                 and #missing > 0 then
             missingChild.noMatchLabel:SetText("No matches.")

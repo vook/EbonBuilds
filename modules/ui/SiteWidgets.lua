@@ -2014,6 +2014,106 @@ function SW.CreateTriStateFilterChip(parent, defaultLabel, onClick, tooltipTitle
     return chip
 end
 
+------------------------------------------------------------------------
+-- Icon-based state chip (single label, tick/cross state icon)
+------------------------------------------------------------------------
+
+function SW.CreateStateIcon(parent, size)
+    size = size or 14
+    local icon = CreateFrame("Frame", nil, parent)
+    icon:SetSize(size, size)
+
+    local check = icon:CreateTexture(nil, "ARTWORK")
+    check:SetAllPoints(icon)
+    check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+    check:Hide()
+
+    local cross = icon:CreateFontString(nil, "ARTWORK")
+    SW.SetFont(cross, size, "semibold")
+    cross:SetPoint("CENTER", icon, "CENTER", 0, 0)
+    cross:SetText("X")
+    cross:Hide()
+
+    icon._check = check
+    icon._cross = cross
+
+    function icon:SetState(state, color)
+        color = color or { 1, 1, 1 }
+        if state == "yes" then
+            check:SetVertexColor(unpack(color))
+            check:Show()
+            cross:Hide()
+        elseif state == "no" then
+            cross:SetTextColor(unpack(color))
+            cross:Show()
+            check:Hide()
+        else
+            check:Hide()
+            cross:Hide()
+        end
+    end
+
+    return icon
+end
+
+local ICON_CHIP_INSET_LEFT  = 8
+local ICON_CHIP_ICON_W      = 14
+local ICON_CHIP_GAP         = 6
+local ICON_CHIP_INSET_RIGHT = 10
+
+local function MeasureIconChipWidth(label)
+    if not triStateChipMeasureFS then
+        triStateChipMeasureFS = UIParent:CreateFontString(nil, "ARTWORK")
+        SW.SetFont(triStateChipMeasureFS, 10, "medium")
+    end
+    triStateChipMeasureFS:Show()
+    triStateChipMeasureFS:SetText(label)
+    local w = triStateChipMeasureFS:GetStringWidth() or 0
+    triStateChipMeasureFS:Hide()
+    return math.max(110, math.ceil(w) + ICON_CHIP_INSET_LEFT + ICON_CHIP_ICON_W
+        + ICON_CHIP_GAP + ICON_CHIP_INSET_RIGHT + 8)
+end
+
+function SW.CreateIconFilterChip(parent, label, onClick, tooltipTitle, tooltipFn)
+    local chip = CreateFrame("Button", nil, parent)
+    chip:SetHeight(26)
+    chip._bg = SW.Fill(chip, "elementBg")
+    chip._border = SW.ThinBorder(chip, "border", 1)
+
+    local icon = SW.CreateStateIcon(chip, ICON_CHIP_ICON_W)
+    icon:SetPoint("LEFT", chip, "LEFT", ICON_CHIP_INSET_LEFT, 0)
+    chip._icon = icon
+
+    local lbl = SW.Label(chip, label, 10, C.textDim)
+    lbl:SetPoint("LEFT", icon, "RIGHT", ICON_CHIP_GAP, 0)
+    lbl:SetJustifyH("LEFT")
+    if lbl.SetWordWrap then lbl:SetWordWrap(false) end
+    if lbl.SetMaxLines then lbl:SetMaxLines(1) end
+    chip._label = lbl
+
+    chip._fixedWidth = MeasureIconChipWidth(label)
+
+    chip:SetScript("OnClick", onClick)
+    chip:SetScript("OnEnter", function(self)
+        SW.SetBorderColor(self._border, C.borderHover)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText(tooltipTitle, 1, 0.82, 0)
+        if tooltipFn then tooltipFn() end
+        GameTooltip:AddLine("Click to cycle filter.", 0.6, 0.8, 1)
+        GameTooltip:Show()
+    end)
+    chip:SetScript("OnLeave", function(self)
+        SW.SetBorderColor(self._border, C.border)
+        GameTooltip:Hide()
+    end)
+
+    function chip:SetChipWidth()
+        self:SetWidth(self._fixedWidth)
+    end
+    chip:SetChipWidth()
+    return chip
+end
+
 function SW.WrapContentCard(parent, inset)
     inset = inset or 0
     local card = CreateFrame("Frame", nil, parent)
