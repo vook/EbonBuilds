@@ -102,7 +102,12 @@ When you edit a build you imported from another player, the build becomes yours:
 
 ## Dependencies
 
-- **[ProjectEbonhold](https://github.com/vook/EbonBuilds)** (version 28+, Interface 30300) — provides the echo database, perk service API, run data, and shared utilities
+EbonBuilds requires the **Project Ebonhold runtime API** (`_G.ProjectEbonhold`) — the echo database, perk service, run data, and shared utilities. It works with either backend:
+
+- **Server ProjectEbonhold** (version 28+, Interface 30300) — the official client addon shipped in MPQ patches
+- **Project Ebonhold Enhanced** — the community open-source replacement loaded via `!ProjectEbonholdSwitcher`
+
+When both are installed, use the switcher (`/pee` or Interface → AddOns → Project Ebonhold) to pick one mode. EbonBuilds initializes once the active backend exposes `ProjectEbonhold`.
 
 ---
 

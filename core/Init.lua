@@ -83,14 +83,31 @@ function EbonBuilds.OpenEchoJournal()
     end
 end
 
-local eventFrame = CreateFrame("Frame")
+local PE_ADDONS = {
+    ProjectEbonhold = true,
+    ProjectEbonholdEnhanced = true,
+}
 
-local function OnAddonLoaded(addonName)
-    if addonName ~= "EbonBuilds" then return end
+local initialized = false
+local unavailableMessageShown = false
 
-    if not ProjectEbonhold then
-        return
+local function PrintUnavailableMessage()
+    if unavailableMessageShown then return end
+    unavailableMessageShown = true
+    if DEFAULT_CHAT_FRAME then
+        DEFAULT_CHAT_FRAME:AddMessage(
+            "|cffB048F8[EbonBuilds]|r Project Ebonhold is not available. "
+                .. "Enable the server addon or Project Ebonhold Enhanced to use /ebb.",
+            1, 0.82, 0
+        )
     end
+end
+
+local function TryInit()
+    if initialized then return true end
+    if not ProjectEbonhold then return false end
+
+    initialized = true
 
     EbonBuildsDB = EbonBuildsDB or {
         builds        = {},
@@ -133,11 +150,57 @@ local function OnAddonLoaded(addonName)
     if EbonBuilds.EchoSearch and EbonBuilds.EchoSearch.StartPrewarm then
         C_Timer.After(1, EbonBuilds.EchoSearch.StartPrewarm)
     end
+
+    return true
 end
 
+function EbonBuilds.EnsureInitialized()
+    return TryInit()
+end
+
+function EbonBuilds.OpenMainWindow()
+    if not TryInit() then return false end
+    if EbonBuilds.MainWindow and EbonBuilds.MainWindow.Toggle then
+        EbonBuilds.MainWindow.Toggle()
+        return true
+    end
+    return false
+end
+
+local function ScheduleUnavailableCheck()
+    if not (C_Timer and C_Timer.After) then return end
+    C_Timer.After(2, function()
+        if not TryInit() then
+            PrintUnavailableMessage()
+        end
+    end)
+end
+
+local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
-eventFrame:SetScript("OnEvent", function(self, event, ...)
+eventFrame:RegisterEvent("PLAYER_LOGIN")
+eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+eventFrame:SetScript("OnEvent", function(_, event, addonName)
     if event == "ADDON_LOADED" then
-        OnAddonLoaded(...)
+        if addonName == "EbonBuilds" or PE_ADDONS[addonName] then
+            TryInit()
+        end
+        return
+    end
+
+    if event == "PLAYER_LOGIN" then
+        TryInit()
+        ScheduleUnavailableCheck()
+        return
+    end
+
+    if event == "PLAYER_ENTERING_WORLD" then
+        TryInit()
     end
 end)
+
+SLASH_EbonBuilds1 = "/ebb"
+SLASH_EbonBuilds2 = "/ebonbuilds"
+SlashCmdList["EbonBuilds"] = function()
+    EbonBuilds.OpenMainWindow()
+end
